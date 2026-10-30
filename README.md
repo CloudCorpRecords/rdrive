@@ -40,7 +40,8 @@ and most NAS boxes).
 
 ### Option B: Node.js (Windows, macOS, Linux)
 
-You need [Node.js](https://nodejs.org) 22 or newer.
+You need [Node.js](https://nodejs.org) 22.9 or newer. Settings can go in a `.env` file (copy
+[.env.example](.env.example)), which `npm start` reads automatically.
 
 ```bash
 git clone https://github.com/CloudCorpRecords/rdrive

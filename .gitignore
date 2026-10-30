@@ -1,3 +1,5 @@
 node_modules/
 # Your files, accounts, sessions and TLS key live here. Never commit it.
 data/
+# Local settings, including the GitHub client secret.
+.env

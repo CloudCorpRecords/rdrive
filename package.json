@@ -4,7 +4,7 @@
   "description": "Self-hosted, open source file drive. Run it on one machine, reach it securely from your other devices.",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js",
+    "start": "node --env-file-if-exists=.env server.js",
     "adduser": "node server.js adduser",
     "adduser-github": "node server.js adduser-github",
     "link-github": "node server.js link-github",
@@ -26,7 +26,7 @@
   "license": "MIT",
   "type": "commonjs",
   "engines": {
-    "node": ">=22"
+    "node": ">=22.9"
   },
   "dependencies": {
     "selfsigned": "^2.4.1"
