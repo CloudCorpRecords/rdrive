@@ -102,11 +102,13 @@ function downloadUrl(p, inline) {
 // ---------- auth ----------
 
 let authMode = 'login';
+let serverStatus = {};
 
-function showAuth(status) {
+function showAuth(status = serverStatus) {
   $('#drive-view').hidden = true;
   $('#auth-view').hidden = false;
   const setup = status && status.needsSetup;
+  $('#sso').hidden = !(status && status.github) || setup;
   authMode = setup ? 'setup' : 'login';
   const form = $('#auth-form');
   $('#auth-error').textContent = '';
@@ -141,6 +143,7 @@ $('#auth-form').addEventListener('submit', async (e) => {
       password: form.password.value,
     });
     form.reset();
+    serverStatus.needsSetup = false;
     state.user = data.user;
     showDrive();
   } catch (ex) {
@@ -734,6 +737,129 @@ document.addEventListener('drop', async (e) => {
   if (!out.length) load();
 });
 
+// ---------- account & devices ----------
+
+function timeAgo(iso) {
+  const s = (Date.now() - new Date(iso).getTime()) / 1000;
+  if (s < 600) return 'active now';
+  if (s < 3600) return `${Math.round(s / 60)} min ago`;
+  if (s < 86400) return `${Math.round(s / 3600)} h ago`;
+  return `${Math.round(s / 86400)} days ago`;
+}
+
+async function renderDevices() {
+  const list = $('#device-list');
+  const { sessions } = await api('GET', '/api/sessions');
+  list.replaceChildren();
+  for (const s of sessions) {
+    const li = document.createElement('li');
+    const info = document.createElement('div');
+    const name = document.createElement('div');
+    name.className = 'dev-name';
+    name.textContent = s.device;
+    if (s.current) {
+      const badge = document.createElement('span');
+      badge.className = 'badge';
+      badge.textContent = 'This device';
+      name.appendChild(badge);
+    }
+    const metaLine = document.createElement('div');
+    metaLine.className = 'dev-meta';
+    const via = s.method === 'github' ? 'GitHub' : 'password';
+    metaLine.textContent = `${s.current ? 'active now' : timeAgo(s.lastSeen)} · ${s.ip || 'unknown IP'} · signed in with ${via} ${formatDate(s.created)}`;
+    info.append(name, metaLine);
+    li.appendChild(info);
+    if (!s.current) {
+      const b = document.createElement('button');
+      b.className = 'btn small btn-danger';
+      b.textContent = 'Sign out';
+      b.addEventListener('click', async () => {
+        try {
+          await api('POST', '/api/sessions/revoke', { id: s.id });
+          toast(`Signed out ${s.device}.`);
+        } catch (ex) {
+          toast(ex.message);
+        }
+        renderDevices();
+      });
+      li.appendChild(b);
+    }
+    list.appendChild(li);
+  }
+  $('#revoke-others').hidden = sessions.length < 2;
+}
+
+async function openAccount() {
+  let acct;
+  try {
+    acct = await api('GET', '/api/account');
+  } catch (ex) {
+    return toast(ex.message);
+  }
+  $('#account-name').textContent = acct.user;
+  $('#github-section').hidden = !acct.githubAvailable && !acct.github;
+  $('#github-status').textContent = acct.github
+    ? `Linked to GitHub account @${acct.github}. You can sign in with the GitHub button.`
+    : 'Not linked. Link your GitHub account to sign in with one click on any device.';
+  $('#github-link').hidden = !!acct.github || !acct.githubAvailable;
+  $('#github-unlink').hidden = !acct.github;
+  $('#github-unlink').disabled = !acct.hasPassword;
+  $('#github-unlink').title = acct.hasPassword ? '' : 'Set a password first, or you would be locked out.';
+  $('#password-title').textContent = acct.hasPassword ? 'Change password' : 'Set a password (optional)';
+  $('#current-row').hidden = !acct.hasPassword;
+  $('#password-form').current.required = acct.hasPassword;
+  $('#password-form').reset();
+  $('#password-error').textContent = '';
+  $('#account-dialog').showModal();
+  renderDevices().catch((ex) => toast(ex.message));
+}
+
+$('#whoami').addEventListener('click', openAccount);
+$('#account-close').addEventListener('click', () => $('#account-dialog').close());
+
+$('#revoke-others').addEventListener('click', async () => {
+  const ok = await confirmDialog('Sign out all other devices?', 'Every other phone, computer or browser will need to sign in again.', 'Sign out others');
+  if (!ok) return;
+  try {
+    await api('POST', '/api/sessions/revoke-others');
+    toast('Signed out all other devices.');
+  } catch (ex) {
+    toast(ex.message);
+  }
+  renderDevices();
+});
+
+$('#github-unlink').addEventListener('click', async () => {
+  const ok = await confirmDialog('Unlink GitHub?', 'You will only be able to sign in with your password.', 'Unlink');
+  if (!ok) return;
+  try {
+    await api('POST', '/api/account/unlink-github');
+    $('#account-dialog').close();
+    toast('GitHub unlinked.');
+  } catch (ex) {
+    toast(ex.message);
+  }
+});
+
+$('#password-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const f = e.target;
+  const err = $('#password-error');
+  err.textContent = '';
+  if (f.next.value !== f.confirm.value) {
+    err.textContent = 'New passwords do not match.';
+    return;
+  }
+  try {
+    await api('POST', '/api/account/password', { current: f.current.value, next: f.next.value });
+    f.reset();
+    $('#account-dialog').close();
+    toast('Password saved. Other devices were signed out.');
+  } catch (ex) {
+    err.textContent = ex.message;
+  }
+});
+
 // ---------- boot ----------
 
 window.addEventListener('hashchange', () => {
@@ -741,15 +867,27 @@ window.addEventListener('hashchange', () => {
 });
 
 (async function boot() {
+  // Results of a GitHub sign-in round trip arrive as query parameters; show them, then tidy the URL.
+  const params = new URLSearchParams(location.search);
+  const authError = params.get('auth_error');
+  const linked = params.get('linked');
+  if (authError || linked) history.replaceState(null, '', '/' + location.hash);
   try {
-    const status = await api('GET', '/api/status');
-    if (status.user) {
-      state.user = status.user;
-      showDrive();
-    } else {
-      showAuth(status);
-    }
+    serverStatus = await api('GET', '/api/status');
   } catch {
     document.body.textContent = 'Could not reach the rdrive server.';
+    return;
+  }
+  if (serverStatus.user) {
+    state.user = serverStatus.user;
+    showDrive();
+    if (authError) toast(authError);
+    if (linked === 'github') {
+      toast('GitHub account linked. You can now sign in with GitHub.');
+      openAccount();
+    }
+  } else {
+    showAuth();
+    if (authError) $('#auth-error').textContent = authError;
   }
 })();

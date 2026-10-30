@@ -1,21 +1,32 @@
 ﻿{
   "name": "rdrive",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Self-hosted, open source file drive. Run it on one machine, reach it securely from your other devices.",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
     "adduser": "node server.js adduser",
+    "adduser-github": "node server.js adduser-github",
+    "link-github": "node server.js link-github",
+    "unlink-github": "node server.js unlink-github",
     "passwd": "node server.js passwd",
     "deluser": "node server.js deluser",
     "users": "node server.js users",
     "test": "node --test test/*.test.js"
   },
-  "keywords": ["drive", "self-hosted", "file-sharing", "google-drive-alternative"],
+  "keywords": ["drive", "self-hosted", "file-sharing", "google-drive-alternative", "sso"],
+  "homepage": "https://github.com/CloudCorpRecords/rdrive#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/CloudCorpRecords/rdrive.git"
+  },
+  "bugs": {
+    "url": "https://github.com/CloudCorpRecords/rdrive/issues"
+  },
   "license": "MIT",
   "type": "commonjs",
   "engines": {
-    "node": ">=20"
+    "node": ">=22"
   },
   "dependencies": {
     "selfsigned": "^2.4.1"

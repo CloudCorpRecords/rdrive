@@ -1,0 +1,46 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Test (${{ matrix.os }}, Node ${{ matrix.node }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        node: [22, 24]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - run: npm ci
+      - run: npm test
+
+  docker:
+    name: Docker image builds and starts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -t rdrive:ci .
+      - name: Smoke test
+        run: |
+          docker run -d --name rdrive -p 8443:8443 rdrive:ci
+          for i in $(seq 1 30); do
+            if curl -fsk https://localhost:8443/api/status; then echo; break; fi
+            sleep 1
+          done
+          curl -fsk https://localhost:8443/api/status | grep -q '"needsSetup":true'
+          curl -fsk https://localhost:8443/ | grep -q '<title>rdrive</title>'
+      - name: Logs
+        if: always()
+        run: docker logs rdrive

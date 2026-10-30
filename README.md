@@ -1,60 +1,87 @@
 # rdrive
 
-An open-source, self-hosted alternative to Google Drive. Run it on one computer, then sign in from your
-phone, laptop or any other device to upload, download, preview and organise files.
+[![CI](https://github.com/CloudCorpRecords/rdrive/actions/workflows/ci.yml/badge.svg)](https://github.com/CloudCorpRecords/rdrive/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
+An open-source, self-hosted alternative to Google Drive. Run it on one machine: a PC, a Mac, a Linux box, a
+Raspberry Pi or a NAS. Then sign in from your phone, laptop or any other device to upload, download, preview
+and organise your files.
 
 - **Your files stay as normal files** in `data/files/<username>/`, so you can back them up or open them directly.
-- **Secure sign-in.** Passwords are hashed with scrypt. Sessions use HttpOnly, SameSite=Strict cookies.
-  Failed logins are rate-limited, and all traffic is encrypted with HTTPS.
-- **Works on any device with a browser.** You can drag and drop files *and whole folders*, upload large
-  files with progress bars, and preview images, video, audio, text and PDFs. You can rename, move (including
-  drag-to-folder) and delete. It has dark mode and a phone layout.
+- **Secure sign-in** with a password or **Sign in with GitHub** (single sign-on). Everything is encrypted with HTTPS.
+- **Manage your devices:** see every phone and computer signed in to your account, and sign any of them out remotely.
+- **Works on any device with a browser.** You can drag and drop files *and whole folders*, upload large files with
+  progress bars, and preview images, video, audio, text and PDFs. You can rename, move (including drag-to-folder)
+  and delete. It has dark mode and a phone layout.
 - **Deletes are recoverable:** deleted items go to `data/trash/<username>/`.
 - **Multiple users**, each with their own private space.
-- **Small:** Node.js plus one dependency (for generating the HTTPS certificate). No database.
+- **Runs anywhere:** Docker images for x86-64 and ARM64, or plain Node.js on Windows, macOS and Linux.
+- **Small and auditable:** one runtime dependency, no database, and tested on every OS in CI.
 
-## Quick start
+## Install
 
-You need [Node.js](https://nodejs.org) 20 or newer.
+### Option A: Docker (Linux, NAS, Raspberry Pi, or Docker Desktop on Windows/Mac)
 
 ```bash
-npm install
+curl -O https://raw.githubusercontent.com/CloudCorpRecords/rdrive/main/docker-compose.yml
 ```
 
 ```bash
+docker compose up -d
+```
+
+```bash
+docker compose exec -it rdrive node server.js adduser yourname
+```
+
+Open `https://<that-machine's-address>:8443` and sign in. Images are published to
+`ghcr.io/cloudcorprecords/rdrive` for `linux/amd64` and `linux/arm64` (Raspberry Pi 3/4/5 running a 64-bit OS,
+and most NAS boxes).
+
+### Option B: Node.js (Windows, macOS, Linux)
+
+You need [Node.js](https://nodejs.org) 22 or newer.
+
+```bash
+git clone https://github.com/CloudCorpRecords/rdrive
+```
+
+```bash
+cd rdrive
+npm install --omit=dev
 npm start
 ```
 
-Open **https://localhost:8443** on the computer running rdrive. Your browser will warn about the certificate.
-That's expected: rdrive made its own certificate. Compare the fingerprint the server printed in the terminal,
-then continue. Create your account. For safety, the first account can only be created from that computer.
+Open **https://localhost:8443** on that machine and create your account there. For safety, the first account can
+only be created from the machine itself. You can also create accounts from the terminal with `npm run adduser -- yourname`.
 
-To add more accounts later (for example for family members):
+To keep it running in the background:
+- **Linux / Raspberry Pi:** use the systemd unit in [docs/rdrive.service](docs/rdrive.service). Its header has the commands.
+- **Windows:** in Task Scheduler, create a task "At log on" (or "At startup") that runs `node` with the argument
+  `server.js`, starting in the rdrive folder.
+- **macOS:** `brew services`, `pm2`, or a LaunchAgent all work. Or use Docker Desktop.
 
-```bash
-npm run adduser -- alice
-```
+### The certificate warning
 
-Other commands: `npm run passwd -- alice` changes a password and signs that user out everywhere.
-`npm run deluser -- alice` removes the account but keeps the files. `npm run users` lists accounts.
+With no other setup, rdrive makes its own HTTPS certificate, so browsers warn the first time. When it starts,
+the server prints the certificate's fingerprint. Check that it matches what your browser shows, then continue.
+To avoid the warning entirely, use Tailscale (below), which gives you a real certificate. You can also put your own
+`cert.pem` and `key.pem` in `data/tls/`.
 
-## Connecting your other devices
+## Connecting your devices
 
-### On the same Wi-Fi / home network
+### Same Wi-Fi / home network
 
-When the server starts, it prints addresses like `https://10.0.0.215:8443`. Open one on your phone or other
-computer and accept the certificate warning once (check the fingerprint). On Windows, allow Node.js through the
-firewall the first time it asks ("Private networks").
+The server prints addresses like `https://10.0.0.215:8443`. Open one on your other devices. On Windows, allow
+Node.js through the firewall the first time it asks ("Private networks").
 
 ### From anywhere (recommended: Tailscale)
 
-**Do not open a port on your router.** The safest way to reach rdrive from outside your home is
-[Tailscale](https://tailscale.com) (free for personal use). It creates a private, encrypted network that
-only your own devices can join.
+**Don't port-forward rdrive on your router.** [Tailscale](https://tailscale.com) (free for personal use) creates a
+private, encrypted network that only your own devices can join, and gives rdrive a real HTTPS address:
 
-1. Install Tailscale on the rdrive computer and on each device, and sign in to the same account on all of them.
-2. Run rdrive so it's only reachable through Tailscale, which gives you a real HTTPS certificate (no browser
-   warnings):
+1. Install Tailscale on the rdrive machine and on each device. Sign in to the same account on all of them.
+2. Run rdrive so it's only reachable through Tailscale:
 
    ```powershell
    $env:RDRIVE_HTTP = '1'; $env:HOST = '127.0.0.1'; npm start
@@ -64,23 +91,75 @@ only your own devices can join.
    tailscale serve --bg 8443
    ```
 
-3. Open the `https://<computer-name>.<tailnet>.ts.net` address that Tailscale prints, from any of your devices.
+3. Open `https://<machine-name>.<your-tailnet>.ts.net` on any of your devices.
 
-Alternatives: [Cloudflare Tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/) or
-a VPN into your home network. If you put rdrive behind any other reverse proxy, make sure the proxy uses HTTPS.
+[Cloudflare Tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/) or a VPN into your
+home network work too. Behind any reverse proxy, set `RDRIVE_HTTP=1` and `RDRIVE_TRUST_PROXY=1`, and make sure the
+proxy uses HTTPS.
+
+## Sign in with GitHub (SSO)
+
+GitHub proves who someone is, and rdrive decides whether they're allowed in. **Only GitHub accounts you've linked
+to an rdrive user can sign in**, so a stranger with a GitHub account gets "not allowed". rdrive only asks GitHub for
+your public profile (your user id). It never sees your GitHub password and never stores GitHub tokens.
+
+1. **Pick one address you'll always use for rdrive**, for example `https://rdrive.your-tailnet.ts.net`. Sign-in
+   comes back to this address. It does *not* need to be reachable from the internet: only your browser visits it.
+2. **Create a GitHub OAuth App:** go to GitHub → Settings → Developer settings → OAuth Apps → *New OAuth App*
+   ([direct link](https://github.com/settings/applications/new)).
+   - Homepage URL: your address, e.g. `https://rdrive.your-tailnet.ts.net`
+   - Authorization callback URL: your address + `/auth/github/callback`
+   - Click *Register*, then *Generate a new client secret*.
+3. **Start rdrive with these settings:**
+
+   ```powershell
+   $env:RDRIVE_PUBLIC_URL = 'https://rdrive.your-tailnet.ts.net'
+   $env:RDRIVE_GITHUB_CLIENT_ID = 'Ov23li...'
+   $env:RDRIVE_GITHUB_CLIENT_SECRET = '...'
+   npm start
+   ```
+
+   (With Docker, set the same three variables in `docker-compose.yml`. With systemd, put them in `/etc/rdrive.env`.)
+   Treat the client secret like a password.
+4. **Allow GitHub accounts**, in one of three ways:
+   - In the web app, sign in with your password, click your name → **Link GitHub account**.
+   - From a terminal, give an existing user GitHub sign-in: `npm run link-github -- yourname your-github-username`
+   - Or create a GitHub-only user (no password at all): `npm run adduser-github -- alice alice-on-github`
+
+Turn on two-factor authentication in your GitHub account: your rdrive is then protected by it too.
+
+## Managing signed-in devices
+
+Click your name in the top-right corner. **Signed-in devices** lists each device: browser and OS, IP address, when it
+was last active, and whether it signed in with a password or GitHub. **Sign out** ends one device's session immediately.
+**Sign out all others** keeps only the device you're using. Changing your password also signs out every other device.
+Sessions expire after 30 days.
+
+## User management (terminal)
+
+| Command | What it does |
+|---|---|
+| `npm run users` | List users and how each can sign in |
+| `npm run adduser -- NAME` | Create a user with a password |
+| `npm run adduser-github -- NAME GH_USER` | Create a user who signs in only with GitHub |
+| `npm run link-github -- NAME GH_USER` | Let an existing user also sign in with GitHub |
+| `npm run unlink-github -- NAME` | Remove GitHub sign-in (the user must have a password) |
+| `npm run passwd -- NAME` | Set or reset a password (signs them out everywhere) |
+| `npm run deluser -- NAME` | Remove a user (their files stay on disk) |
+
+With Docker, run `docker compose exec -it rdrive node server.js <command> ...` instead.
 
 ## Configuration
 
-Set these as environment variables:
-
-| Variable       | Default        | What it does                                                                 |
-|----------------|----------------|------------------------------------------------------------------------------|
-| `PORT`         | `8443`         | Port to listen on                                                            |
-| `HOST`         | `0.0.0.0`      | `0.0.0.0` = reachable from your network; `127.0.0.1` = this computer only    |
-| `RDRIVE_DATA`  | `./data`       | Where files, accounts and the certificate are stored (e.g. a big external drive) |
-| `RDRIVE_HTTP`  | (unset)        | Set to `1` to serve plain HTTP. **Only** use this behind something that already encrypts, like `tailscale serve` |
-
-To use your own certificate, put `cert.pem` and `key.pem` in `data/tls/`.
+| Variable | Default | What it does |
+|---|---|---|
+| `PORT` | `8443` | Port to listen on |
+| `HOST` | `0.0.0.0` | `0.0.0.0` = reachable from your network; `127.0.0.1` = this machine only |
+| `RDRIVE_DATA` | `./data` (`/data` in Docker) | Where files, accounts and the certificate are stored |
+| `RDRIVE_HTTP` | unset | `1` = plain HTTP. **Only** behind something that already encrypts (Tailscale, a reverse proxy) |
+| `RDRIVE_TRUST_PROXY` | unset | `1` = read the client IP from `X-Forwarded-For` (only behind a proxy you control) |
+| `RDRIVE_PUBLIC_URL` | unset | The address people use for rdrive. Needed for GitHub sign-in |
+| `RDRIVE_GITHUB_CLIENT_ID` / `RDRIVE_GITHUB_CLIENT_SECRET` | unset | Turn on GitHub sign-in |
 
 ## What's in `data/`
 
@@ -88,42 +167,50 @@ To use your own certificate, put `cert.pem` and `key.pem` in `data/tls/`.
 data/
   files/<user>/     your files, as normal files and folders
   trash/<user>/     deleted items (timestamp__name). Empty it by hand when you want the space back
-  users.json        usernames + scrypt password hashes
-  sessions.json     active sign-ins (stored hashed)
+  users.json        users, scrypt password hashes, linked GitHub ids
+  sessions.json     signed-in devices (tokens are stored hashed)
   tls/              HTTPS certificate and private key
 ```
 
 Back up `data/files` like any other folder. Keep `data/` private: never commit it or share it.
 
-## Security model, in brief
+## Security model
 
-- The first account can only be created from the machine itself (loopback, not proxied).
-- Each user is confined to their own folder. Paths are validated and `..` and other tricks are rejected (see tests).
-- CSRF protection: SameSite=Strict cookies, plus a custom header that's required on every change.
-- After 5 failed logins, that IP address is locked out for 15 minutes. Behind `tailscale serve`, every request
-  looks like it comes from the same address, so this limit is shared. That's fine there, because only your own
-  devices can connect.
-- HTML/SVG files are always downloaded, never rendered, so an uploaded file can't run scripts in rdrive's page.
-- Strict Content-Security-Policy and other hardening headers.
+- Passwords are hashed with scrypt. Login timing doesn't reveal whether a username exists.
+- After 5 failed logins (including unknown GitHub accounts), that IP address is locked out for 15 minutes.
+- Session cookies are random 256-bit tokens, `HttpOnly`, `SameSite=Strict` and `Secure`. The server stores only their
+  SHA-256 hashes.
+- GitHub sign-in uses the OAuth web flow with a single-use `state`, PKCE, and a cookie that binds the flow to the
+  browser that started it. Accounts are matched by GitHub's permanent numeric id, not the username, which can change.
+- The first account can only be created from the machine itself.
+- Each user is confined to their own folder. All paths are validated, and `..`, drive letters, NTFS streams and similar
+  tricks are rejected.
+- CSRF protection: `SameSite=Strict` cookies, plus a custom header that's required on every change.
+- HTML and SVG files are always downloaded, never rendered. A strict Content-Security-Policy and other hardening
+  headers are set on every response.
+
+Found a problem? Please report it privately. See [SECURITY.md](SECURITY.md).
 
 ## Development
 
 ```bash
+npm install
 npm test
 ```
 
-The code layout: `server.js` (HTTP routes + CLI), `lib/auth.js` (accounts and sessions), `lib/files.js`
-(file operations and path safety), `lib/tls.js` (certificates), `public/` (the web app: plain HTML/CSS/JS,
-no build step).
+The code layout: `server.js` (routes and CLI), `lib/auth.js` (users, passwords, sessions), `lib/github.js`
+(GitHub sign-in), `lib/files.js` (file operations and path safety), `lib/tls.js` (certificates), `public/` (the web
+app: plain HTML/CSS/JS, no build step). See [CONTRIBUTING.md](CONTRIBUTING.md).
 
-## Ideas for later
+## Roadmap
 
-- Share links (public, expiring links to a single file)
+- Sync between several rdrive servers
+- Share links (expiring links to a single file)
 - Download a folder as .zip
-- Search, and a trash view in the UI with restore
-- Desktop sync client / WebDAV support so the drive can be mounted like a network drive
-- Storage quotas per user
+- Search, and a trash view with restore
+- WebDAV, so the drive can be mounted like a network drive
+- More SSO providers (generic OpenID Connect: Google, Microsoft, Authentik, Keycloak)
 
 ## License
 
-MIT, see [LICENSE](LICENSE).
+MIT. See [LICENSE](LICENSE).

@@ -1,0 +1,30 @@
+# Start:          docker compose up -d
+# Create a user:  docker compose exec -it rdrive node server.js adduser <name>
+# Logs:           docker compose logs -f rdrive
+services:
+  rdrive:
+    image: ghcr.io/cloudcorprecords/rdrive:latest
+    # Or build from this folder instead of pulling:
+    # build: .
+    container_name: rdrive
+    restart: unless-stopped
+    ports:
+      - "8443:8443"
+    volumes:
+      # Your files, accounts and certificate live in this Docker volume.
+      - rdrive-data:/data
+      # To keep them in a normal folder instead (e.g. a big disk), use a bind mount.
+      # On Linux, first run: mkdir -p /mnt/bigdisk/rdrive && sudo chown 1000:1000 /mnt/bigdisk/rdrive
+      # - /mnt/bigdisk/rdrive:/data
+    environment:
+      TZ: UTC
+      # --- Optional: "Sign in with GitHub" (see README) ---
+      # RDRIVE_PUBLIC_URL: https://rdrive.example.ts.net
+      # RDRIVE_GITHUB_CLIENT_ID: your-client-id
+      # RDRIVE_GITHUB_CLIENT_SECRET: your-client-secret
+      # --- Optional: behind a reverse proxy that already does HTTPS ---
+      # RDRIVE_HTTP: "1"
+      # RDRIVE_TRUST_PROXY: "1"
+
+volumes:
+  rdrive-data:

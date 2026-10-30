@@ -1,0 +1,35 @@
+name: Bug report
+description: Something isn't working
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Found a security problem?** Please don't open a public issue. See SECURITY.md to report it privately.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What did you do, what did you expect, and what happened instead?
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: rdrive version or commit
+  - type: dropdown
+    id: install
+    attributes:
+      label: How do you run rdrive?
+      options: [Docker, Node.js directly, Other]
+  - type: input
+    id: platform
+    attributes:
+      label: Server OS and the browser/device you used
+      placeholder: e.g. Ubuntu 24.04 server, Safari on iPhone
+  - type: textarea
+    id: logs
+    attributes:
+      label: Server log output
+      description: Remove anything private (paths, IP addresses) before pasting.
+      render: text

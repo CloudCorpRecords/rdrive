@@ -1,0 +1,27 @@
+# systemd unit for running rdrive on Linux (including Raspberry Pi) without Docker.
+#   sudo useradd --system --create-home --home-dir /var/lib/rdrive rdrive
+#   sudo git clone https://github.com/CloudCorpRecords/rdrive /opt/rdrive && cd /opt/rdrive && sudo npm ci --omit=dev
+#   sudo cp docs/rdrive.service /etc/systemd/system/ && sudo systemctl enable --now rdrive
+#   sudo -u rdrive RDRIVE_DATA=/var/lib/rdrive/data node /opt/rdrive/server.js adduser <name>
+[Unit]
+Description=rdrive self-hosted file drive
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=rdrive
+WorkingDirectory=/opt/rdrive
+Environment=RDRIVE_DATA=/var/lib/rdrive/data
+Environment=PORT=8443
+# Put GitHub sign-in settings in this file (KEY=value per line), readable only by root/rdrive.
+EnvironmentFile=-/etc/rdrive.env
+ExecStart=/usr/bin/node /opt/rdrive/server.js
+Restart=on-failure
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/lib/rdrive
+
+[Install]
+WantedBy=multi-user.target
