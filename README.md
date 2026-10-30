@@ -136,6 +136,36 @@ was last active, and whether it signed in with a password or GitHub. **Sign out*
 **Sign out all others** keeps only the device you're using. Changing your password also signs out every other device.
 Sessions expire after 30 days.
 
+## Sync between several servers
+
+Run rdrive on more than one machine (say a home server and a laptop) and link them, so the same accounts have the
+same files on each. Every server keeps a full copy and works on its own while the others are offline.
+
+1. **Make the servers reachable from each other over https.** Tailscale is the easiest way (see above). Each server's
+   own self-signed certificate is fine: it's pinned when you link.
+2. **Create the same usernames on each server.** Only accounts whose username exists on both servers sync. Passwords
+   and signed-in devices are not synced.
+3. On the first server, as the **owner** (the first account you created), click your name → **Linked servers** →
+   **Show pairing code**.
+4. On the second server, as its owner, click **Link a server…** and enter:
+   - the first server's address, e.g. `https://home-server.tailnet-name.ts.net:8443`
+   - the code from step 3 (it works once, for 10 minutes)
+   - this server's own address, as the first one reaches it (it's filled in with the address in your browser)
+5. Both servers now list each other. Files sync within seconds after a change made in the web app, and every minute
+   otherwise. Files changed directly on disk in `data/files/` are picked up too.
+
+How changes are handled:
+
+- **Edits, new files, renames and moves** are copied to the other servers.
+- **Deletes** move the item to the other servers' trash, so nothing is lost for good.
+- **Conflicts.** If the same file was changed on two servers before they synced, both versions are kept. The newer
+  one keeps the name, and the other becomes `name (conflict from <server> <date>).ext`, the same on every server.
+  If one server edits a file while another deletes it, the edit wins.
+- **Large files** are downloaded with resume and checked against a SHA-256 hash before they replace anything.
+
+To make another account the owner: `npm run set-owner -- NAME`. To stop syncing, click **Unlink**. Nothing is deleted
+on either server. The details and security design are in [docs/sync.md](docs/sync.md).
+
 ## User management (terminal)
 
 | Command | What it does |
@@ -146,6 +176,7 @@ Sessions expire after 30 days.
 | `npm run link-github -- NAME GH_USER` | Let an existing user also sign in with GitHub |
 | `npm run unlink-github -- NAME` | Remove GitHub sign-in (the user must have a password) |
 | `npm run passwd -- NAME` | Set or reset a password (signs them out everywhere) |
+| `npm run set-owner -- NAME` | Make NAME the owner (the account that can link servers for sync) |
 | `npm run deluser -- NAME` | Remove a user (their files stay on disk) |
 
 With Docker, run `docker compose exec -it rdrive node server.js <command> ...` instead.
@@ -161,6 +192,8 @@ With Docker, run `docker compose exec -it rdrive node server.js <command> ...` i
 | `RDRIVE_TRUST_PROXY` | unset | `1` = read the client IP from `X-Forwarded-For` (only behind a proxy you control) |
 | `RDRIVE_PUBLIC_URL` | unset | The address people use for rdrive. Needed for GitHub sign-in |
 | `RDRIVE_GITHUB_CLIENT_ID` / `RDRIVE_GITHUB_CLIENT_SECRET` | unset | Turn on GitHub sign-in |
+| `RDRIVE_SERVER_NAME` | the computer's name | How this server is named to linked servers and in conflict copies |
+| `RDRIVE_SYNC_INTERVAL` | `60` | Seconds between sync checks with linked servers (changes made in the web app sync sooner) |
 
 ## What's in `data/`
 
@@ -171,6 +204,8 @@ data/
   users.json        users, scrypt password hashes, linked GitHub ids
   sessions.json     signed-in devices (tokens are stored hashed)
   tls/              HTTPS certificate and private key
+  peers.json        linked servers: address, pinned certificate, shared secret
+  sync/             this server's sync id, what each linked server last agreed on, hash cache, partial downloads
 ```
 
 Back up `data/files` like any other folder. Keep `data/` private: never commit it or share it.
@@ -189,6 +224,10 @@ Back up `data/files` like any other folder. Keep `data/` private: never commit i
 - CSRF protection: `SameSite=Strict` cookies, plus a custom header that's required on every change.
 - HTML and SVG files are always downloaded, never rendered. A strict Content-Security-Policy and other hardening
   headers are set on every response.
+- Sync: servers pair with a single-use code that never crosses the network (it signs a proof bound to both
+  certificates). After that, every request between servers is signed with a per-server secret and can't be replayed,
+  and self-signed certificates are pinned. Linked servers can only read from each other, never write, and every path
+  they send is checked like a user's.
 
 Found a problem? Please report it privately. See [SECURITY.md](SECURITY.md).
 
@@ -200,12 +239,12 @@ npm test
 ```
 
 The code layout: `server.js` (routes and CLI), `lib/auth.js` (users, passwords, sessions), `lib/github.js`
-(GitHub sign-in), `lib/files.js` (file operations and path safety), `lib/tls.js` (certificates), `public/` (the web
+(GitHub sign-in), `lib/files.js` (file operations and path safety), `lib/sync.js` (server-to-server sync),
+`lib/tls.js` (certificates), `public/` (the web
 app: plain HTML/CSS/JS, no build step). See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Roadmap
 
-- Sync between several rdrive servers
 - Share links (expiring links to a single file)
 - Download a folder as .zip
 - Search, and a trash view with restore

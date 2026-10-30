@@ -812,7 +812,108 @@ async function openAccount() {
   $('#password-error').textContent = '';
   $('#account-dialog').showModal();
   renderDevices().catch((ex) => toast(ex.message));
+  $('#sync-code').hidden = true;
+  $('#sync-link-form').hidden = true;
+  renderSync().catch((ex) => toast(ex.message));
 }
+
+// ---------- linked servers (sync) ----------
+
+async function renderSync() {
+  const s = await api('GET', '/api/sync');
+  $('#sync-section').hidden = !s.available || (!s.owner && !s.peers.length);
+  if (!s.available) return;
+  $('#sync-owner').hidden = !s.owner;
+  $('#sync-now').hidden = !s.peers.length;
+  $('#sync-status').textContent = s.peers.length
+    ? `Files of accounts that exist on both servers stay in sync. This server is "${s.name}".${s.syncing ? ' Syncing now…' : ''}`
+    : `Link another rdrive server to keep the same accounts' files on both. This server is "${s.name}".`;
+  const list = $('#peer-list');
+  list.replaceChildren();
+  for (const p of s.peers) {
+    const li = document.createElement('li');
+    const info = document.createElement('div');
+    const name = document.createElement('div');
+    name.className = 'dev-name';
+    name.textContent = p.name;
+    const metaLine = document.createElement('div');
+    metaLine.className = 'dev-meta';
+    const when = p.lastSync ? `synced ${timeAgo(p.lastSync).replace('active now', 'just now')}` : 'not synced yet';
+    metaLine.textContent = `${p.url} · ${when}${p.fingerprint ? ` · certificate ${p.fingerprint.slice(0, 23)}…` : ''}`;
+    info.append(name, metaLine);
+    if (p.lastError) {
+      const err = document.createElement('div');
+      err.className = 'error';
+      err.textContent = p.lastError;
+      info.appendChild(err);
+    }
+    li.appendChild(info);
+    if (s.owner) {
+      const b = document.createElement('button');
+      b.className = 'btn small btn-danger';
+      b.textContent = 'Unlink';
+      b.addEventListener('click', async () => {
+        const ok = await confirmDialog(`Unlink ${p.name}?`, 'Files stop syncing with that server. Nothing is deleted on either one.', 'Unlink');
+        if (!ok) return;
+        try {
+          await api('POST', '/api/sync/unlink', { id: p.id });
+          toast(`Unlinked ${p.name}.`);
+        } catch (ex) {
+          toast(ex.message);
+        }
+        renderSync();
+      });
+      li.appendChild(b);
+    }
+    list.appendChild(li);
+  }
+}
+
+$('#sync-now').addEventListener('click', async () => {
+  try {
+    await api('POST', '/api/sync/now');
+    toast('Syncing with linked servers…');
+    setTimeout(() => renderSync().catch(() => {}), 3000);
+  } catch (ex) {
+    toast(ex.message);
+  }
+});
+
+$('#sync-code-btn').addEventListener('click', async () => {
+  try {
+    const c = await api('POST', '/api/sync/code');
+    $('#sync-code-value').textContent = c.code;
+    $('#sync-fp').textContent = c.fingerprint || 'none (certificate handled by a proxy)';
+    $('#sync-code').hidden = false;
+    $('#sync-link-form').hidden = true;
+  } catch (ex) {
+    toast(ex.message);
+  }
+});
+
+$('#sync-link-btn').addEventListener('click', () => {
+  const f = $('#sync-link-form');
+  f.reset();
+  f.selfUrl.value = location.origin;
+  $('#sync-error').textContent = '';
+  $('#sync-code').hidden = true;
+  f.hidden = false;
+  f.url.focus();
+});
+
+$('#sync-link-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const f = e.target;
+  $('#sync-error').textContent = '';
+  try {
+    const { peer } = await api('POST', '/api/sync/link', { url: f.url.value, code: f.code.value, selfUrl: f.selfUrl.value });
+    f.hidden = true;
+    toast(`Linked ${peer.name}. Files will start syncing shortly.`);
+    renderSync();
+  } catch (ex) {
+    $('#sync-error').textContent = ex.message;
+  }
+});
 
 $('#whoami').addEventListener('click', openAccount);
 $('#account-close').addEventListener('click', () => $('#account-dialog').close());

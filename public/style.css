@@ -227,6 +227,14 @@ dialog.account[open] { display: flex; flex-direction: column; }
 .row-actions { display: flex; gap: 8px; margin-top: 8px; }
 .password-form { display: flex; flex-direction: column; gap: 10px; max-width: 320px; }
 .password-form label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; font-weight: 500; }
+.mono { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; word-break: break-all; }
+#peer-list:empty { display: none; }
+#sync-owner { margin-top: 8px; }
+.sync-code { margin-top: 12px; padding: 12px; border: 1px solid var(--border); border-radius: 8px; }
+.sync-code p { margin: 0 0 8px; }
+.sync-code p:last-child { margin-bottom: 0; }
+.sync-code-value { font-size: 20px; font-weight: 600; letter-spacing: 1px; }
+#sync-link-form { margin-top: 12px; }
 
 /* Toast */
 .toast {

@@ -6,6 +6,7 @@
 //   node server.js link-github NAME GH      let an existing user also sign in with GitHub
 //   node server.js unlink-github NAME       remove a user's GitHub sign-in
 //   node server.js passwd NAME              set/change a password (signs that user out everywhere)
+//   node server.js set-owner NAME           make NAME the owner (the account that can link servers)
 //   node server.js deluser NAME             remove a user (their files stay on disk)
 //   node server.js users                    list users
 const fs = require('node:fs');
@@ -17,6 +18,7 @@ const { Auth, SESSION_TTL_MS } = require('./lib/auth');
 const { Files, HttpError } = require('./lib/files');
 const { GitHubAuth, lookupGithubUser } = require('./lib/github');
 const { loadOrCreateCert, lanAddresses } = require('./lib/tls');
+const { Sync } = require('./lib/sync');
 
 const DATA_DIR = path.resolve(process.env.RDRIVE_DATA || path.join(__dirname, 'data'));
 const PORT = Number(process.env.PORT || 8443);
@@ -71,7 +73,7 @@ function redirect(res, location) {
   res.end();
 }
 
-function readJsonBody(req) {
+function readRawBody(req) {
   return new Promise((resolve, reject) => {
     let size = 0;
     const chunks = [];
@@ -82,15 +84,21 @@ function readJsonBody(req) {
         req.destroy();
       } else chunks.push(c);
     });
-    req.on('end', () => {
-      try {
-        resolve(chunks.length ? JSON.parse(Buffer.concat(chunks).toString('utf8')) : {});
-      } catch {
-        reject(new HttpError(400, 'Invalid JSON.'));
-      }
-    });
+    req.on('end', () => resolve(Buffer.concat(chunks)));
     req.on('error', reject);
   });
+}
+
+function parseJson(buf) {
+  try {
+    return buf.length ? JSON.parse(buf.toString('utf8')) : {};
+  } catch {
+    throw new HttpError(400, 'Invalid JSON.');
+  }
+}
+
+async function readJsonBody(req) {
+  return parseJson(await readRawBody(req));
 }
 
 function parseCookies(header) {
@@ -152,8 +160,8 @@ async function serveDownload(req, res, file, inline) {
   fs.createReadStream(file.full).pipe(res);
 }
 
-// options: { auth, files, github?, secureCookies?, trustProxy? }
-function createHandler({ auth, files, github = null, secureCookies = USE_HTTPS, trustProxy = TRUST_PROXY }) {
+// options: { auth, files, github?, sync?, secureCookies?, trustProxy? }
+function createHandler({ auth, files, github = null, sync = null, secureCookies = USE_HTTPS, trustProxy = TRUST_PROXY }) {
   const secure = secureCookies ? '; Secure' : '';
   const sessionCookie = (token, maxAgeSec) => `${COOKIE}=${token}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${maxAgeSec}${secure}`;
   // Lax, because GitHub's redirect back to us is a cross-site navigation and Strict cookies aren't sent on it.
@@ -226,6 +234,35 @@ function createHandler({ auth, files, github = null, secureCookies = USE_HTTPS, 
         return redirect(res, '/');
       }
 
+      // ---- Server-to-server sync. Never uses cookies: every request is signed by a linked server. ----
+      if (route.startsWith('/sync/')) {
+        if (!sync) throw new HttpError(404, 'Not found.');
+        const wait = auth.lockedFor(ip);
+        if (wait) throw new HttpError(429, 'Too many failed attempts. Try again later.');
+        const raw = req.method === 'POST' ? await readRawBody(req) : Buffer.alloc(0);
+        if (route === '/sync/pair' && req.method === 'POST') return sendJson(res, 200, sync.acceptPair(parseJson(raw), ip));
+        const peer = sync.authenticate(req, raw);
+        if (!peer) {
+          auth.recordFailure(ip);
+          throw new HttpError(401, 'Not a linked server.');
+        }
+        if (route === '/sync/manifest' && req.method === 'GET') {
+          return sendJson(res, 200, { entries: await sync.manifest(q.get('user')) });
+        }
+        if (route === '/sync/file' && (req.method === 'GET' || req.method === 'HEAD')) {
+          return serveDownload(req, res, await sync.fileFor(q.get('user'), q.get('path'), q.get('sha256')), false);
+        }
+        if (route === '/sync/nudge' && req.method === 'POST') {
+          sync.nudged(peer);
+          return sendJson(res, 200, { ok: true });
+        }
+        if (route === '/sync/unpair' && req.method === 'POST') {
+          sync.removePeer(peer.id);
+          return sendJson(res, 200, { ok: true });
+        }
+        throw new HttpError(404, 'Not found.');
+      }
+
       if (!route.startsWith('/api/')) throw new HttpError(404, 'Not found.');
 
       // CSRF protection: browsers won't let another site add a custom header to a
@@ -284,24 +321,29 @@ function createHandler({ auth, files, github = null, secureCookies = USE_HTTPS, 
         const file = await files.fileForDownload(user, q.get('path'));
         return serveDownload(req, res, file, q.get('inline') === '1');
       }
+      const changed = () => sync && sync.localChanged();
       if (route === '/api/upload' && req.method === 'PUT') {
         const name = await files.upload(user, q.get('path'), q.get('name'), req, { overwrite: q.get('overwrite') === '1' });
+        changed();
         return sendJson(res, 200, { name });
       }
       if (route === '/api/mkdir' && req.method === 'POST') {
         const { path: p, name } = await readJsonBody(req);
         await files.mkdir(user, p, name);
+        changed();
         return sendJson(res, 200, { ok: true });
       }
       if (route === '/api/move' && req.method === 'POST') {
         const { from, to } = await readJsonBody(req);
         await files.move(user, from, to);
+        changed();
         return sendJson(res, 200, { ok: true });
       }
       if (route === '/api/delete' && req.method === 'POST') {
         const { paths } = await readJsonBody(req);
         if (!Array.isArray(paths) || !paths.length) throw new HttpError(400, 'Nothing to delete.');
         for (const p of paths) await files.trash(user, p);
+        changed();
         return sendJson(res, 200, { ok: true });
       }
       if (route === '/api/usage' && req.method === 'GET') {
@@ -353,6 +395,29 @@ function createHandler({ auth, files, github = null, secureCookies = USE_HTTPS, 
       if (route === '/api/sessions/revoke-others' && req.method === 'POST') {
         auth.revokeUserSessions(user, token);
         return sendJson(res, 200, { ok: true });
+      }
+
+      // ---- Linked servers (sync). Everyone can see them; only the owner can change them. ----
+      if (route === '/api/sync' && req.method === 'GET') {
+        return sendJson(res, 200, { owner: auth.isOwner(user), available: !!sync, ...(sync ? sync.status() : {}) });
+      }
+      if (route.startsWith('/api/sync/')) {
+        if (!sync) throw new HttpError(404, 'Sync is not available on this server.');
+        if (!auth.isOwner(user)) throw new HttpError(403, 'Only the owner can manage linked servers.');
+        if (route === '/api/sync/code' && req.method === 'POST') return sendJson(res, 200, sync.createCode());
+        if (route === '/api/sync/link' && req.method === 'POST') {
+          const { url: peerUrl, code, selfUrl } = await readJsonBody(req);
+          return sendJson(res, 200, { peer: await sync.link(peerUrl, code, selfUrl) });
+        }
+        if (route === '/api/sync/unlink' && req.method === 'POST') {
+          const { id } = await readJsonBody(req);
+          await sync.unlink(id);
+          return sendJson(res, 200, { ok: true });
+        }
+        if (route === '/api/sync/now' && req.method === 'POST') {
+          sync.syncAll().catch((err) => console.error(err));
+          return sendJson(res, 200, { ok: true });
+        }
       }
       throw new HttpError(404, 'Not found.');
     } catch (err) {
@@ -427,6 +492,10 @@ async function cli(cmd, args) {
     need(name, 'passwd <username>');
     auth.setPassword(name, await askNewPassword());
     console.log(`Password set for "${name}". Their existing sessions were signed out.`);
+  } else if (cmd === 'set-owner') {
+    need(name, 'set-owner <username>');
+    auth.setOwner(name);
+    console.log(`"${name}" is now the owner (can link servers for sync).`);
   } else if (cmd === 'deluser') {
     need(name, 'deluser <username>');
     auth.deleteUser(name);
@@ -442,17 +511,21 @@ function start() {
   const files = new Files(DATA_DIR);
   const github = GitHubAuth.fromEnv(process.env);
   const publicHttps = /^https:/i.test(process.env.RDRIVE_PUBLIC_URL || '');
-  const handler = createHandler({ auth, files, github, secureCookies: USE_HTTPS || publicHttps });
+  const tlsInfo = USE_HTTPS ? loadOrCreateCert(DATA_DIR) : null;
+  const sync = new Sync({
+    dataDir: DATA_DIR,
+    auth,
+    files,
+    name: process.env.RDRIVE_SERVER_NAME,
+    url: publicHttps ? process.env.RDRIVE_PUBLIC_URL : null,
+    certPem: tlsInfo && tlsInfo.cert,
+    interval: Number(process.env.RDRIVE_SYNC_INTERVAL || 60),
+  });
+  const handler = createHandler({ auth, files, github, sync, secureCookies: USE_HTTPS || publicHttps });
   setInterval(() => auth.pruneSessions(), 60 * 60 * 1000).unref();
+  sync.start();
 
-  let server;
-  let tlsInfo;
-  if (USE_HTTPS) {
-    tlsInfo = loadOrCreateCert(DATA_DIR);
-    server = https.createServer({ cert: tlsInfo.cert, key: tlsInfo.key }, handler);
-  } else {
-    server = http.createServer(handler);
-  }
+  const server = tlsInfo ? https.createServer({ cert: tlsInfo.cert, key: tlsInfo.key }, handler) : http.createServer(handler);
   // Large uploads over slow links can take a long time; don't cut them off.
   server.requestTimeout = 0;
 
@@ -470,6 +543,8 @@ function start() {
       console.log('  Your browser will warn the first time; check this fingerprint matches, then continue.');
     }
     console.log(github ? `\n  GitHub sign-in: on (callback ${github.callbackUrl})` : '\n  GitHub sign-in: off (see README to enable)');
+    const linked = Object.keys(sync.peers).length;
+    console.log(`  Sync: this server is "${sync.name}", ${linked} linked server${linked === 1 ? '' : 's'}`);
     if (!auth.hasUsers()) {
       console.log(`\n  No accounts yet. Open ${scheme}://localhost:${PORT} on THIS computer to create one,`);
       console.log('  or run: npm run adduser -- <username>');
