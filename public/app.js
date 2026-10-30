@@ -5,6 +5,8 @@ const $ = (sel) => document.querySelector(sel);
 const state = {
   user: null,
   path: '/',
+  view: 'drive', // 'drive' | 'trash' | 'search'
+  searchQuery: '',
   entries: [],
   selected: new Set(),
   menuTarget: null,
@@ -67,6 +69,21 @@ function toast(msg) {
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => (t.hidden = true), 3500);
 }
+window.rdriveToast = toast;
+
+async function copyText(text, label = 'Copied to clipboard.') {
+  try {
+    await navigator.clipboard.writeText(text);
+    toast(label);
+  } catch {
+    prompt('Copy this address:', text);
+  }
+}
+
+function isSheetFile(name) {
+  const ext = String(name || '').split('.').pop().toLowerCase();
+  return ['rsheet', 'csv', 'tsv'].includes(ext);
+}
 
 function svgIcon(kind) {
   const ns = 'http://www.w3.org/2000/svg';
@@ -76,18 +93,23 @@ function svgIcon(kind) {
   svg.setAttribute('aria-hidden', 'true');
   const p = document.createElementNS(ns, 'path');
   p.setAttribute('fill', 'currentColor');
-  p.setAttribute('d', kind === 'folder'
-    ? 'M3 6.5A2.5 2.5 0 0 1 5.5 4h3.6c.6 0 1.2.3 1.6.7L12 6h6.5A2.5 2.5 0 0 1 21 8.5v9a2.5 2.5 0 0 1-2.5 2.5h-13A2.5 2.5 0 0 1 3 17.5z'
-    : 'M6.5 2h7.1c.4 0 .8.2 1.1.4l4.4 4.4c.3.3.4.7.4 1.1V19.5A2.5 2.5 0 0 1 17 22H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2zM13 3.5V7c0 .8.7 1.5 1.5 1.5H18z');
+  if (kind === 'folder') {
+    p.setAttribute('d', 'M3 6.5A2.5 2.5 0 0 1 5.5 4h3.6c.6 0 1.2.3 1.6.7L12 6h6.5A2.5 2.5 0 0 1 21 8.5v9a2.5 2.5 0 0 1-2.5 2.5h-13A2.5 2.5 0 0 1 3 17.5z');
+  } else if (kind === 'sheet') {
+    p.setAttribute('d', 'M5 3h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2zm0 4v3h6V7H5zm8 0v3h6V7h-6zm-8 5v3h6v-3H5zm8 0v3h6v-3h-6zm-8 5v2h6v-2H5zm8 0v2h6v-2h-6z');
+  } else {
+    p.setAttribute('d', 'M6.5 2h7.1c.4 0 .8.2 1.1.4l4.4 4.4c.3.3.4.7.4 1.1V19.5A2.5 2.5 0 0 1 17 22H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2zM13 3.5V7c0 .8.7 1.5 1.5 1.5H18z');
+  }
   svg.appendChild(p);
   return svg;
 }
 
 const PREVIEW = {
+  sheet: ['rsheet', 'csv', 'tsv'],
   image: ['png', 'jpg', 'jpeg', 'gif', 'webp', 'avif', 'bmp'],
   video: ['mp4', 'webm', 'mov', 'm4v'],
   audio: ['mp3', 'wav', 'ogg', 'm4a', 'flac'],
-  text: ['txt', 'md', 'log', 'csv', 'json'],
+  text: ['txt', 'md', 'log', 'json'],
   pdf: ['pdf'],
 };
 function previewKind(name) {
@@ -99,6 +121,10 @@ function downloadUrl(p, inline) {
   return `/api/download?path=${encodeURIComponent(p)}${inline ? '&inline=1' : ''}`;
 }
 
+function zipUrl(p) {
+  return `/api/zip?path=${encodeURIComponent(p)}`;
+}
+
 // ---------- auth ----------
 
 let authMode = 'login';
@@ -106,6 +132,7 @@ let serverStatus = {};
 
 function showAuth(status = serverStatus) {
   $('#drive-view').hidden = true;
+  $('#public-share-view').hidden = true;
   $('#auth-view').hidden = false;
   const setup = status && status.needsSetup;
   $('#sso').hidden = !(status && status.github) || setup;
@@ -159,7 +186,7 @@ $('#logout').addEventListener('click', async () => {
   showAuth();
 });
 
-// ---------- drive ----------
+// ---------- drive, search & trash ----------
 
 function pathFromHash() {
   const raw = location.hash.replace(/^#/, '') || '/';
@@ -171,6 +198,9 @@ function pathFromHash() {
 }
 
 function navigate(p) {
+  state.view = 'drive';
+  state.searchQuery = '';
+  $('#search-input').value = '';
   const hash = '#/' + p.split('/').filter(Boolean).map(encodeURIComponent).join('/');
   if (location.hash === hash) load();
   else location.hash = hash;
@@ -178,6 +208,7 @@ function navigate(p) {
 
 function showDrive() {
   $('#auth-view').hidden = true;
+  $('#public-share-view').hidden = true;
   $('#drive-view').hidden = false;
   $('#whoami').textContent = state.user;
   load();
@@ -185,8 +216,38 @@ function showDrive() {
 }
 
 async function load() {
-  state.path = pathFromHash();
   state.selected.clear();
+  $('#drive-actions').hidden = state.view === 'trash';
+  $('#trash-actions').hidden = state.view !== 'trash';
+  $('#trash-btn').classList.toggle('btn-primary', state.view === 'trash');
+  $('#trash-btn').classList.toggle('btn-ghost', state.view !== 'trash');
+
+  if (state.view === 'trash') {
+    try {
+      const data = await api('GET', '/api/trash');
+      state.entries = data.items;
+    } catch (ex) {
+      toast(ex.message);
+      state.entries = [];
+    }
+    renderTrash();
+    return;
+  }
+
+  if (state.view === 'search' && state.searchQuery) {
+    try {
+      const data = await api('GET', `/api/search?q=${encodeURIComponent(state.searchQuery)}`);
+      state.entries = data.results;
+    } catch (ex) {
+      toast(ex.message);
+      state.entries = [];
+    }
+    renderSearch();
+    return;
+  }
+
+  state.view = 'drive';
+  state.path = pathFromHash();
   try {
     const data = await api('GET', `/api/list?path=${encodeURIComponent(state.path)}`);
     state.entries = data.entries;
@@ -198,6 +259,48 @@ async function load() {
   }
   render();
 }
+
+let searchTimer;
+$('#search-input').addEventListener('input', (e) => {
+  clearTimeout(searchTimer);
+  const q = e.target.value.trim();
+  searchTimer = setTimeout(() => {
+    if (!q) {
+      state.view = 'drive';
+      state.searchQuery = '';
+      load();
+    } else {
+      state.view = 'search';
+      state.searchQuery = q;
+      load();
+    }
+  }, 180);
+});
+
+$('#trash-btn').addEventListener('click', () => {
+  state.view = state.view === 'trash' ? 'drive' : 'trash';
+  $('#search-input').value = '';
+  state.searchQuery = '';
+  load();
+});
+
+$('#trash-back').addEventListener('click', () => {
+  state.view = 'drive';
+  load();
+});
+
+$('#empty-trash').addEventListener('click', async () => {
+  if (!state.entries.length) return toast('Trash is already empty.');
+  const ok = await confirmDialog('Empty trash?', 'All items in your trash will be permanently deleted and cannot be recovered.', 'Empty trash');
+  if (!ok) return;
+  try {
+    await api('POST', '/api/trash/empty');
+    toast('Trash emptied.');
+    load();
+  } catch (ex) {
+    toast(ex.message);
+  }
+});
 
 let usageTimer;
 function refreshUsage() {
@@ -232,9 +335,12 @@ function renderCrumbs(container, p, onClick, dropTargets) {
 
 function render() {
   renderCrumbs($('#crumbs'), state.path, navigate, true);
+  $('#select-all').disabled = false;
   const rows = $('#rows');
   rows.replaceChildren();
   $('#empty').hidden = state.entries.length > 0;
+  $('#empty-title').textContent = 'This folder is empty.';
+  $('#empty-sub').textContent = 'Drop files or folders here, create a Spreadsheet, or use Upload.';
 
   for (const entry of state.entries) {
     const p = joinPath(state.path, entry.name);
@@ -254,7 +360,8 @@ function render() {
 
     const name = document.createElement('span');
     name.className = 'cell-name';
-    name.appendChild(svgIcon(entry.type === 'folder' ? 'folder' : 'file'));
+    const iconType = entry.type === 'folder' ? 'folder' : isSheetFile(entry.name) ? 'sheet' : 'file';
+    name.appendChild(svgIcon(iconType));
     const link = document.createElement('a');
     link.className = 'name';
     link.textContent = entry.name;
@@ -302,6 +409,149 @@ function render() {
   syncSelectionUi();
 }
 
+function renderSearch() {
+  const crumbs = $('#crumbs');
+  crumbs.replaceChildren();
+  const b = document.createElement('button');
+  b.type = 'button';
+  b.textContent = `Search results for "${state.searchQuery}" (${state.entries.length})`;
+  crumbs.appendChild(b);
+
+  $('#select-all').disabled = true;
+  const rows = $('#rows');
+  rows.replaceChildren();
+  $('#empty').hidden = state.entries.length > 0;
+  $('#empty-title').textContent = 'No matching files or folders.';
+  $('#empty-sub').textContent = 'Try another search term.';
+
+  for (const entry of state.entries) {
+    const row = document.createElement('div');
+    row.className = 'row';
+    row.tabIndex = 0;
+
+    const check = document.createElement('span');
+    check.className = 'cell-check';
+
+    const name = document.createElement('span');
+    name.className = 'cell-name';
+    const iconType = entry.type === 'folder' ? 'folder' : isSheetFile(entry.name) ? 'sheet' : 'file';
+    name.appendChild(svgIcon(iconType));
+    const link = document.createElement('a');
+    link.className = 'name';
+    link.textContent = entry.name;
+    link.title = entry.path;
+    link.addEventListener('click', () => openEntry(entry, entry.dir));
+    const loc = document.createElement('span');
+    loc.className = 'muted small';
+    loc.textContent = entry.dir === '/' ? '' : `in ${entry.dir}`;
+    name.append(link, loc);
+
+    const size = document.createElement('span');
+    size.className = 'cell-size';
+    size.textContent = entry.type === 'folder' ? '—' : formatSize(entry.size);
+
+    const date = document.createElement('span');
+    date.className = 'cell-date';
+    date.textContent = formatDate(entry.modified);
+
+    const menuCell = document.createElement('span');
+    menuCell.className = 'cell-menu';
+    const menuBtn = document.createElement('button');
+    menuBtn.type = 'button';
+    menuBtn.textContent = '⋯';
+    menuBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      openMenu({ ...entry, dir: entry.dir }, menuBtn);
+    });
+    menuCell.appendChild(menuBtn);
+
+    row.append(check, name, size, date, menuCell);
+    row.addEventListener('dblclick', () => openEntry(entry, entry.dir));
+    rows.appendChild(row);
+  }
+}
+
+function renderTrash() {
+  const crumbs = $('#crumbs');
+  crumbs.replaceChildren();
+  const b = document.createElement('button');
+  b.type = 'button';
+  b.textContent = 'Trash';
+  crumbs.appendChild(b);
+
+  $('#select-all').disabled = true;
+  const rows = $('#rows');
+  rows.replaceChildren();
+  $('#empty').hidden = state.entries.length > 0;
+  $('#empty-title').textContent = 'Trash is empty.';
+  $('#empty-sub').textContent = 'Items you delete from your drive appear here so you can restore them.';
+
+  for (const item of state.entries) {
+    const row = document.createElement('div');
+    row.className = 'row';
+
+    const check = document.createElement('span');
+    check.className = 'cell-check';
+
+    const name = document.createElement('span');
+    name.className = 'cell-name';
+    const iconType = item.type === 'folder' ? 'folder' : isSheetFile(item.name) ? 'sheet' : 'file';
+    name.appendChild(svgIcon(iconType));
+    const label = document.createElement('span');
+    label.className = 'name';
+    label.textContent = item.name;
+    const orig = document.createElement('span');
+    orig.className = 'muted small';
+    orig.textContent = `from ${item.originalDir || '/'}`;
+    name.append(label, orig);
+
+    const size = document.createElement('span');
+    size.className = 'cell-size';
+    size.textContent = item.type === 'folder' ? '—' : formatSize(item.size);
+
+    const date = document.createElement('span');
+    date.className = 'cell-date';
+    date.textContent = formatDate(item.deletedAt);
+
+    const actCell = document.createElement('span');
+    actCell.className = 'cell-menu trash-row-actions';
+    const restoreBtn = document.createElement('button');
+    restoreBtn.type = 'button';
+    restoreBtn.className = 'btn small';
+    restoreBtn.textContent = 'Restore';
+    restoreBtn.addEventListener('click', async () => {
+      try {
+        const { restored } = await api('POST', '/api/trash/restore', { id: item.id });
+        toast(`Restored "${restored.name}" to ${restored.dir}.`);
+        load();
+        refreshUsage();
+      } catch (ex) {
+        toast(ex.message);
+      }
+    });
+    const delBtn = document.createElement('button');
+    delBtn.type = 'button';
+    delBtn.className = 'btn small btn-danger';
+    delBtn.textContent = '×';
+    delBtn.title = 'Delete permanently';
+    delBtn.addEventListener('click', async () => {
+      const ok = await confirmDialog(`Permanently delete "${item.name}"?`, 'This cannot be undone.', 'Delete forever');
+      if (!ok) return;
+      try {
+        await api('POST', '/api/trash/delete', { id: item.id });
+        toast(`Deleted "${item.name}".`);
+        load();
+      } catch (ex) {
+        toast(ex.message);
+      }
+    });
+    actCell.append(restoreBtn, delBtn);
+
+    row.append(check, name, size, date, actCell);
+    rows.appendChild(row);
+  }
+}
+
 // ---------- selection ----------
 
 function toggleSelect(name, on) {
@@ -311,10 +561,11 @@ function toggleSelect(name, on) {
 }
 
 function syncSelectionUi() {
-  for (const row of document.querySelectorAll('#rows .row')) {
+  for (const row of document.querySelectorAll('#rows .row[data-name]')) {
     const on = state.selected.has(row.dataset.name);
     row.classList.toggle('selected', on);
-    row.querySelector('input[type="checkbox"]').checked = on;
+    const cb = row.querySelector('input[type="checkbox"]');
+    if (cb) cb.checked = on;
   }
   const n = state.selected.size;
   $('#selection-actions').hidden = n === 0;
@@ -333,8 +584,10 @@ $('#delete-selected').addEventListener('click', () => deletePaths([...state.sele
 $('#move-selected').addEventListener('click', () => moveDialog([...state.selected].map((n) => joinPath(state.path, n))));
 
 document.addEventListener('keydown', (e) => {
-  if ($('#drive-view').hidden || document.querySelector('dialog[open]') || e.target.matches('input')) return;
-  if (e.key === 'Delete' && state.selected.size) deletePaths([...state.selected].map((n) => joinPath(state.path, n)));
+  if ($('#drive-view').hidden || document.querySelector('dialog[open]') || e.target.matches('input, select, textarea')) return;
+  if (e.key === 'Delete' && state.selected.size && state.view === 'drive') {
+    deletePaths([...state.selected].map((n) => joinPath(state.path, n)));
+  }
   if (e.key === 'Escape') {
     state.selected.clear();
     syncSelectionUi();
@@ -343,23 +596,57 @@ document.addEventListener('keydown', (e) => {
 
 // ---------- actions ----------
 
-function openEntry(entry) {
-  const p = joinPath(state.path, entry.name);
+function openEntry(entry, baseDir = state.path) {
+  const p = entry.path || joinPath(baseDir, entry.name);
   if (entry.type === 'folder') return navigate(p);
   const kind = previewKind(entry.name);
+  if (kind === 'sheet') return openSpreadsheet(entry.name, p);
   if (kind === 'pdf') return window.open(downloadUrl(p, true), '_blank', 'noopener');
   if (kind) return preview(entry.name, p, kind);
   download(p);
 }
 
-function download(p) {
+function openSpreadsheet(name, clientPath) {
+  const dir = parentOf(clientPath);
+  const fileName = clientPath.split('/').pop();
+  window.RDriveSheets.openSheetModal({
+    name,
+    path: clientPath,
+    readOnly: false,
+    loadContent: async () => {
+      const res = await fetch(downloadUrl(clientPath, true), { credentials: 'same-origin' });
+      if (!res.ok) throw new Error('Could not load spreadsheet.');
+      return await res.text();
+    },
+    saveContent: async (payload) => {
+      const res = await fetch(`/api/upload?path=${encodeURIComponent(dir)}&name=${encodeURIComponent(fileName)}&overwrite=1`, {
+        method: 'PUT',
+        headers: { 'X-Rdrive': '1', 'Content-Type': 'application/octet-stream' },
+        credentials: 'same-origin',
+        body: payload,
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || 'Save failed');
+      }
+    },
+    onSaved: () => {
+      load();
+      refreshUsage();
+    },
+  });
+}
+
+function download(p, isFolder = false) {
   const a = document.createElement('a');
-  a.href = downloadUrl(p);
+  a.href = isFolder ? zipUrl(p) : downloadUrl(p);
   a.download = '';
   document.body.appendChild(a);
   a.click();
   a.remove();
 }
+
+$('#download-zip').addEventListener('click', () => download(state.path, true));
 
 async function preview(name, p, kind) {
   const body = $('#preview-body');
@@ -392,7 +679,7 @@ async function preview(name, p, kind) {
 $('#preview-close').addEventListener('click', () => $('#preview-dialog').close());
 $('#preview-dialog').addEventListener('close', () => $('#preview-body').replaceChildren());
 
-function ask(title, value = '', okText = 'OK', validate) {
+function ask(title, value = '', okText = 'OK') {
   return new Promise((resolve) => {
     const dlg = $('#prompt-dialog');
     const input = $('#prompt-input');
@@ -408,7 +695,6 @@ function ask(title, value = '', okText = 'OK', validate) {
     dlg.returnValue = '';
     dlg.showModal();
     input.focus();
-    // Select the name part, not the extension, like most file managers.
     const dot = value.lastIndexOf('.');
     input.setSelectionRange(0, dot > 0 ? dot : value.length);
   });
@@ -426,6 +712,22 @@ function confirmDialog(title, text, okText) {
   });
 }
 
+async function createNewSpreadsheet() {
+  const name = await ask('New spreadsheet (.rsheet or .csv)', 'Untitled spreadsheet.rsheet', 'Create & open');
+  if (!name) return;
+  try {
+    const created = await api('POST', '/api/sheet/create', { path: state.path, name });
+    await load();
+    refreshUsage();
+    openSpreadsheet(created.name, created.path);
+  } catch (ex) {
+    toast(ex.message);
+  }
+}
+window.rdriveCreateSpreadsheet = createNewSpreadsheet;
+
+$('#new-sheet').addEventListener('click', createNewSpreadsheet);
+
 $('#new-folder').addEventListener('click', async () => {
   const name = await ask('New folder', 'Untitled folder', 'Create');
   if (!name) return;
@@ -437,12 +739,29 @@ $('#new-folder').addEventListener('click', async () => {
   }
 });
 
-async function renameEntry(entry) {
+async function renameEntry(entry, baseDir = state.path) {
   const name = await ask(`Rename "${entry.name}"`, entry.name, 'Rename');
   if (!name || name === entry.name) return;
   try {
-    await api('POST', '/api/move', { from: joinPath(state.path, entry.name), to: joinPath(state.path, name) });
+    await api('POST', '/api/move', { from: joinPath(baseDir, entry.name), to: joinPath(baseDir, name) });
     await load();
+  } catch (ex) {
+    toast(ex.message);
+  }
+}
+
+async function copyEntry(entry, baseDir = state.path) {
+  const ext = entry.name.includes('.') ? '.' + entry.name.split('.').pop() : '';
+  const stem = ext ? entry.name.slice(0, -ext.length) : entry.name;
+  const copyName = `${stem} copy${ext}`;
+  try {
+    const res = await api('POST', '/api/copy', {
+      from: joinPath(baseDir, entry.name),
+      to: joinPath(baseDir, copyName),
+    });
+    toast(`Created "${res.name}".`);
+    await load();
+    refreshUsage();
   } catch (ex) {
     toast(ex.message);
   }
@@ -450,11 +769,11 @@ async function renameEntry(entry) {
 
 async function deletePaths(paths) {
   const label = paths.length === 1 ? `"${paths[0].split('/').pop()}"` : `${paths.length} items`;
-  const ok = await confirmDialog(`Delete ${label}?`, 'Deleted items are moved to the trash folder inside rdrive\'s data folder on the server, where they can be recovered.', 'Delete');
+  const ok = await confirmDialog(`Delete ${label}?`, 'Deleted items are moved to Trash, where you can restore them anytime.', 'Delete');
   if (!ok) return;
   try {
     await api('POST', '/api/delete', { paths });
-    toast(`Deleted ${label}.`);
+    toast(`Moved ${label} to Trash.`);
   } catch (ex) {
     toast(ex.message);
   }
@@ -519,12 +838,97 @@ function moveDialog(paths) {
   dlg.showModal();
 }
 
+// ---------- share links dialog ----------
+
+let currentSharePath = null;
+
+async function openShareDialog(entry, baseDir = state.path) {
+  const p = entry.path || joinPath(baseDir, entry.name);
+  currentSharePath = p;
+  $('#share-item-name').textContent = entry.name;
+  $('#share-form').reset();
+  $('#share-error').textContent = '';
+  $('#share-edit-row').hidden = !(entry.type === 'file' && isSheetFile(entry.name));
+  $('#share-dialog').showModal();
+  await renderShareList();
+}
+
+async function renderShareList() {
+  if (!currentSharePath) return;
+  const list = $('#share-list');
+  list.replaceChildren();
+  const { shares } = await api('GET', `/api/shares?path=${encodeURIComponent(currentSharePath)}`);
+  $('#share-empty').hidden = shares.length > 0;
+  for (const s of shares) {
+    const fullUrl = location.origin + s.url;
+    const li = document.createElement('li');
+    const info = document.createElement('div');
+    const title = document.createElement('div');
+    title.className = 'dev-name mono small';
+    title.textContent = fullUrl;
+    const meta = document.createElement('div');
+    meta.className = 'dev-meta';
+    const parts = [
+      s.expires ? `Expires ${formatDate(s.expires)}` : 'Never expires',
+      s.hasPassword ? 'Password protected' : 'Public link',
+      s.allowEdit ? 'Can edit sheet' : 'View / download',
+    ];
+    meta.textContent = parts.join(' · ');
+    info.append(title, meta);
+    const actions = document.createElement('div');
+    actions.className = 'row-actions';
+    const copyBtn = document.createElement('button');
+    copyBtn.type = 'button';
+    copyBtn.className = 'btn small';
+    copyBtn.textContent = 'Copy';
+    copyBtn.addEventListener('click', () => copyText(fullUrl, 'Share link copied!'));
+    const revokeBtn = document.createElement('button');
+    revokeBtn.type = 'button';
+    revokeBtn.className = 'btn small btn-danger';
+    revokeBtn.textContent = 'Revoke';
+    revokeBtn.addEventListener('click', async () => {
+      try {
+        await api('POST', '/api/shares/revoke', { id: s.id });
+        toast('Share link revoked.');
+        renderShareList();
+      } catch (ex) {
+        toast(ex.message);
+      }
+    });
+    actions.append(copyBtn, revokeBtn);
+    li.append(info, actions);
+    list.appendChild(li);
+  }
+}
+
+$('#share-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const f = e.target;
+  $('#share-error').textContent = '';
+  try {
+    const { share } = await api('POST', '/api/shares', {
+      path: currentSharePath,
+      expiresInHours: Number(f.expiresInHours.value),
+      password: f.password.value,
+      allowEdit: f.allowEdit.checked,
+    });
+    f.password.value = '';
+    const fullUrl = location.origin + share.url;
+    await copyText(fullUrl, 'Share link created and copied!');
+    await renderShareList();
+  } catch (ex) {
+    $('#share-error').textContent = ex.message;
+  }
+});
+
+$('#share-close').addEventListener('click', () => $('#share-dialog').close());
+
 // ---------- row menu ----------
 
 function openMenu(entry, anchor, x, y) {
   const menu = $('#menu');
   state.menuTarget = entry;
-  menu.querySelector('[data-act="download"]').hidden = entry.type === 'folder';
+  $('#menu-download').textContent = entry.type === 'folder' ? 'Download .zip' : 'Download';
   menu.hidden = false;
   const r = anchor ? anchor.getBoundingClientRect() : { left: x, right: x, bottom: y, top: y };
   const w = menu.offsetWidth;
@@ -550,10 +954,13 @@ $('#menu').addEventListener('click', (e) => {
   const entry = state.menuTarget;
   closeMenu();
   if (!act || !entry) return;
-  const p = joinPath(state.path, entry.name);
-  if (act === 'open') openEntry(entry);
-  if (act === 'download') download(p);
-  if (act === 'rename') renameEntry(entry);
+  const baseDir = entry.dir || state.path;
+  const p = entry.path || joinPath(baseDir, entry.name);
+  if (act === 'open') openEntry(entry, baseDir);
+  if (act === 'share') openShareDialog(entry, baseDir);
+  if (act === 'download') download(p, entry.type === 'folder');
+  if (act === 'copy') copyEntry(entry, baseDir);
+  if (act === 'rename') renameEntry(entry, baseDir);
   if (act === 'move') moveDialog([p]);
   if (act === 'delete') deletePaths([p]);
 });
@@ -586,7 +993,6 @@ let activeUploads = 0;
 const MAX_PARALLEL = 3;
 
 function queueUploads(items) {
-  // items: [{ file, dir }]
   if (!items.length) return;
   $('#uploads').hidden = false;
   for (const it of items) {
@@ -677,7 +1083,6 @@ $('#file-input').addEventListener('change', (e) => {
   e.target.value = '';
 });
 
-// Read every file inside a dropped folder, creating matching folders on the server.
 async function collectEntry(entry, dir, out) {
   if (entry.isFile) {
     const file = await new Promise((res, rej) => entry.file(res, rej));
@@ -690,7 +1095,6 @@ async function collectEntry(entry, dir, out) {
       if (!/already exists/.test(ex.message)) throw ex;
     }
     const reader = entry.createReader();
-    // readEntries returns results in batches; keep calling until it returns none.
     for (;;) {
       const batch = await new Promise((res, rej) => reader.readEntries(res, rej));
       if (!batch.length) break;
@@ -703,7 +1107,7 @@ let dragDepth = 0;
 const hasFiles = (e) => e.dataTransfer && e.dataTransfer.types.includes('Files');
 
 document.addEventListener('dragenter', (e) => {
-  if (!hasFiles(e) || !state.user) return;
+  if (!hasFiles(e) || !state.user || state.view !== 'drive') return;
   dragDepth++;
   $('#drop-overlay').hidden = false;
 });
@@ -720,7 +1124,7 @@ document.addEventListener('drop', async (e) => {
   e.preventDefault();
   dragDepth = 0;
   $('#drop-overlay').hidden = true;
-  if (!state.user) return;
+  if (!state.user || state.view !== 'drive') return;
   const target = state.path;
   const entries = [...e.dataTransfer.items].map((i) => (i.webkitGetAsEntry ? i.webkitGetAsEntry() : null));
   const out = [];
@@ -737,7 +1141,7 @@ document.addEventListener('drop', async (e) => {
   if (!out.length) load();
 });
 
-// ---------- account & devices ----------
+// ---------- account, WebDAV & devices ----------
 
 function timeAgo(iso) {
   const s = (Date.now() - new Date(iso).getTime()) / 1000;
@@ -797,6 +1201,9 @@ async function openAccount() {
     return toast(ex.message);
   }
   $('#account-name').textContent = acct.user;
+  const davUrl = `${location.origin}/dav/`;
+  $('#webdav-url').textContent = davUrl;
+  $('#copy-webdav').onclick = () => copyText(davUrl, 'WebDAV address copied!');
   $('#github-section').hidden = !acct.githubAvailable && !acct.github;
   $('#github-status').textContent = acct.github
     ? `Linked to GitHub account @${acct.github}. You can sign in with the GitHub button.`
@@ -812,10 +1219,96 @@ async function openAccount() {
   $('#password-error').textContent = '';
   $('#account-dialog').showModal();
   renderDevices().catch((ex) => toast(ex.message));
+  $('#mcp-token-form').hidden = true;
+  $('#mcp-created-box').hidden = true;
+  renderAgentTokens().catch((ex) => toast(ex.message));
   $('#sync-code').hidden = true;
   $('#sync-link-form').hidden = true;
   renderSync().catch((ex) => toast(ex.message));
 }
+
+async function renderAgentTokens() {
+  const list = $('#mcp-token-list');
+  const { tokens } = await api('GET', '/api/tokens');
+  list.replaceChildren();
+  for (const t of tokens) {
+    const li = document.createElement('li');
+    const info = document.createElement('div');
+    const name = document.createElement('div');
+    name.className = 'dev-name';
+    name.textContent = t.label;
+    const badge = document.createElement('span');
+    badge.className = 'badge';
+    badge.textContent = t.scope === 'read' ? 'read-only' : 'read & write';
+    name.appendChild(badge);
+    const meta = document.createElement('div');
+    meta.className = 'dev-meta';
+    const used = t.lastUsed ? `last used ${timeAgo(t.lastUsed)}` : 'never used';
+    const exp = t.expires ? `expires ${formatDate(t.expires)}` : 'never expires';
+    meta.textContent = `folder: ${t.rootPath} · ${used} · ${exp}`;
+    info.append(name, meta);
+    const b = document.createElement('button');
+    b.className = 'btn small btn-danger';
+    b.textContent = 'Revoke';
+    b.addEventListener('click', async () => {
+      try {
+        await api('POST', '/api/tokens/revoke', { id: t.id });
+        toast(`Revoked token "${t.label}".`);
+        renderAgentTokens();
+      } catch (ex) {
+        toast(ex.message);
+      }
+    });
+    li.append(info, b);
+    list.appendChild(li);
+  }
+}
+
+$('#mcp-new-btn').addEventListener('click', () => {
+  const f = $('#mcp-token-form');
+  f.reset();
+  f.rootPath.value = state.path || '/';
+  $('#mcp-token-error').textContent = '';
+  $('#mcp-created-box').hidden = true;
+  f.hidden = !f.hidden;
+  if (!f.hidden) f.label.focus();
+});
+
+$('#mcp-token-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const f = e.target;
+  $('#mcp-token-error').textContent = '';
+  try {
+    const { token } = await api('POST', '/api/tokens', {
+      label: f.label.value,
+      scope: f.scope.value,
+      rootPath: f.rootPath.value || '/',
+      expiresInDays: Number(f.expiresInDays.value),
+    });
+    f.hidden = true;
+    $('#mcp-created-token').textContent = token;
+    $('#mcp-created-box').hidden = false;
+    $('#mcp-copy-token').onclick = () => copyText(token, 'Agent token copied!');
+    const mcpConfig = JSON.stringify(
+      {
+        mcpServers: {
+          rdrive: {
+            url: `${location.origin}/mcp`,
+            headers: {
+              Authorization: `Bearer ${token}`,
+            },
+          },
+        },
+      },
+      null,
+      2
+    );
+    $('#mcp-copy-config').onclick = () => copyText(mcpConfig, 'MCP JSON config copied!');
+    await renderAgentTokens();
+  } catch (ex) {
+    $('#mcp-token-error').textContent = ex.message;
+  }
+});
 
 // ---------- linked servers (sync) ----------
 
@@ -961,6 +1454,128 @@ $('#password-form').addEventListener('submit', async (e) => {
   }
 });
 
+// ---------- public share view (/s/:id) ----------
+
+async function bootPublicShare(shareId, subPath = '/') {
+  $('#auth-view').hidden = true;
+  $('#drive-view').hidden = true;
+  $('#public-share-view').hidden = false;
+
+  let info;
+  try {
+    info = await api('GET', `/api/public/share?id=${encodeURIComponent(shareId)}&sub=${encodeURIComponent(subPath)}`);
+  } catch (ex) {
+    $('#public-share-lock').hidden = false;
+    $('#public-share-content').hidden = true;
+    $('#public-share-lock-title').textContent = 'Link unavailable';
+    $('#public-share-lock-form').querySelector('label').hidden = true;
+    $('#public-share-lock-form').querySelector('button').hidden = true;
+    $('#public-share-lock-error').textContent = ex.message;
+    return;
+  }
+
+  if (info.locked) {
+    $('#public-share-lock').hidden = false;
+    $('#public-share-content').hidden = true;
+    $('#public-share-lock-title').textContent = `Unlock "${info.name}"`;
+    $('#public-share-lock-form').onsubmit = async (e) => {
+      e.preventDefault();
+      $('#public-share-lock-error').textContent = '';
+      try {
+        await api('POST', '/api/public/share/unlock', { id: shareId, password: e.target.password.value });
+        e.target.reset();
+        bootPublicShare(shareId, subPath);
+      } catch (ex) {
+        $('#public-share-lock-error').textContent = ex.message;
+      }
+    };
+    return;
+  }
+
+  $('#public-share-lock').hidden = true;
+  $('#public-share-content').hidden = false;
+  $('#public-share-badge').textContent = info.allowEdit ? 'Shared spreadsheet (Editable)' : 'Shared link';
+
+  const dlUrl = `/api/public/share/download?id=${encodeURIComponent(shareId)}&sub=${encodeURIComponent(subPath)}`;
+  $('#public-share-download').href = dlUrl;
+  $('#public-share-download').textContent = info.type === 'folder' ? 'Download .zip' : 'Download';
+
+  const openSheetBtn = $('#public-share-open-sheet');
+  openSheetBtn.hidden = !info.isSheet;
+  const launchSharedSheet = () => {
+    window.RDriveSheets.openSheetModal({
+      name: info.name,
+      path: info.name,
+      readOnly: !info.allowEdit,
+      loadContent: async () => {
+        const r = await fetch(`${dlUrl}&inline=1`, { credentials: 'same-origin' });
+        if (!r.ok) throw new Error('Could not load shared spreadsheet.');
+        return await r.text();
+      },
+      saveContent: async (payload) => {
+        const r = await fetch(`/api/public/share/save?id=${encodeURIComponent(shareId)}`, {
+          method: 'PUT',
+          headers: { 'X-Rdrive': '1', 'Content-Type': 'application/octet-stream' },
+          credentials: 'same-origin',
+          body: payload,
+        });
+        if (!r.ok) throw new Error('Could not save shared spreadsheet.');
+      },
+    });
+  };
+  openSheetBtn.onclick = launchSharedSheet;
+
+  const crumbs = $('#public-share-crumbs');
+  renderCrumbs(crumbs, subPath, (nextSub) => bootPublicShare(shareId, nextSub), false);
+  if (crumbs.firstChild) crumbs.firstChild.textContent = info.name;
+
+  const rows = $('#public-share-rows');
+  rows.replaceChildren();
+  if (info.type === 'file') {
+    const row = document.createElement('div');
+    row.className = 'row';
+    const check = document.createElement('span');
+    const name = document.createElement('span');
+    name.className = 'cell-name';
+    name.append(svgIcon(info.isSheet ? 'sheet' : 'file'), document.createTextNode(info.name));
+    const size = document.createElement('span');
+    size.className = 'cell-size';
+    size.textContent = formatSize(info.size);
+    const date = document.createElement('span');
+    date.className = 'cell-date';
+    date.textContent = formatDate(info.modified);
+    row.append(check, name, size, date, document.createElement('span'));
+    rows.appendChild(row);
+    if (info.isSheet) launchSharedSheet();
+  } else if (Array.isArray(info.entries)) {
+    for (const entry of info.entries) {
+      const entrySub = joinPath(subPath, entry.name);
+      const row = document.createElement('div');
+      row.className = 'row';
+      const check = document.createElement('span');
+      const name = document.createElement('span');
+      name.className = 'cell-name';
+      name.appendChild(svgIcon(entry.type === 'folder' ? 'folder' : isSheetFile(entry.name) ? 'sheet' : 'file'));
+      const link = document.createElement('a');
+      link.className = 'name';
+      link.textContent = entry.name;
+      link.addEventListener('click', () => {
+        if (entry.type === 'folder') bootPublicShare(shareId, entrySub);
+        else window.location.href = `/api/public/share/download?id=${encodeURIComponent(shareId)}&sub=${encodeURIComponent(entrySub)}`;
+      });
+      name.appendChild(link);
+      const size = document.createElement('span');
+      size.className = 'cell-size';
+      size.textContent = entry.type === 'folder' ? '—' : formatSize(entry.size);
+      const date = document.createElement('span');
+      date.className = 'cell-date';
+      date.textContent = formatDate(entry.modified);
+      row.append(check, name, size, date, document.createElement('span'));
+      rows.appendChild(row);
+    }
+  }
+}
+
 // ---------- boot ----------
 
 window.addEventListener('hashchange', () => {
@@ -968,7 +1583,10 @@ window.addEventListener('hashchange', () => {
 });
 
 (async function boot() {
-  // Results of a GitHub sign-in round trip arrive as query parameters; show them, then tidy the URL.
+  const shareMatch = /^\/s\/([A-Za-z0-9_-]+)$/.exec(location.pathname);
+  if (shareMatch) {
+    return bootPublicShare(shareMatch[1]);
+  }
   const params = new URLSearchParams(location.search);
   const authError = params.get('auth_error');
   const linked = params.get('linked');

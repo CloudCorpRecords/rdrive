@@ -75,6 +75,37 @@ class DriveClient(
         return runCatching { JSONObject(body).getString("name") }.getOrDefault(name)
     }
 
+    /** Creates a new spreadsheet (.rsheet or .csv) in [dir] and returns its saved path. */
+    fun createSpreadsheet(dir: String, name: String = "Untitled spreadsheet.rsheet"): String {
+        val c = open("/api/sheet/create", "POST")
+        c.doOutput = true
+        c.setRequestProperty("Content-Type", "application/json")
+        c.outputStream.use {
+            it.write(JSONObject().put("path", dir).put("name", safeName(name)).toString().toByteArray())
+        }
+        val body = check(c, 200)
+        return JSONObject(body).getString("path")
+    }
+
+    /** Creates an expiring share link for [path] and returns its relative URL (/s/<id>). */
+    fun createShareLink(path: String, expiresInHours: Int = 168, allowEdit: Boolean = false): String {
+        val c = open("/api/shares", "POST")
+        c.doOutput = true
+        c.setRequestProperty("Content-Type", "application/json")
+        c.outputStream.use {
+            it.write(
+                JSONObject()
+                    .put("path", path)
+                    .put("expiresInHours", expiresInHours)
+                    .put("allowEdit", allowEdit)
+                    .toString()
+                    .toByteArray()
+            )
+        }
+        val body = check(c, 200)
+        return JSONObject(body).getJSONObject("share").getString("url")
+    }
+
     companion object {
         private val BAD = Regex("[<>:\"/\\\\|?*\\u0000-\\u001f]")
         private val RESERVED = Regex("^(con|prn|aux|nul|com[0-9]|lpt[0-9])(\\..*)?$", RegexOption.IGNORE_CASE)

@@ -143,6 +143,10 @@ class MainActivity : Activity() {
             }
         }
         w.setDownloadListener { dlUrl, _, contentDisposition, mimeType, _ ->
+            if (!dlUrl.startsWith("https://") && !dlUrl.startsWith("http://")) {
+                Toast.makeText(this, "Saved to your drive.", Toast.LENGTH_SHORT).show()
+                return@setDownloadListener
+            }
             val name = URLUtil.guessFileName(dlUrl, contentDisposition, mimeType)
             val req = DownloadManager.Request(Uri.parse(dlUrl))
                 .addRequestHeader("Cookie", CookieManager.getInstance().getCookie(dlUrl) ?: "")
@@ -220,6 +224,9 @@ class MainActivity : Activity() {
 
     override fun onOptionsItemSelected(item: MenuItem): Boolean {
         when (item.itemId) {
+            R.id.new_spreadsheet -> {
+                web?.evaluateJavascript("window.rdriveCreateSpreadsheet && window.rdriveCreateSpreadsheet()", null)
+            }
             R.id.upload_folder -> {
                 askNotificationPermission()
                 startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT_TREE), REQ_TREE)

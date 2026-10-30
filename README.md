@@ -3,21 +3,24 @@
 [![CI](https://github.com/CloudCorpRecords/rdrive/actions/workflows/ci.yml/badge.svg)](https://github.com/CloudCorpRecords/rdrive/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-An open-source, self-hosted alternative to Google Drive. Run it on one machine: a PC, a Mac, a Linux box, a
-Raspberry Pi or a NAS. Then sign in from your phone, laptop or any other device to upload, download, preview
-and organise your files.
+An open-source, self-hosted alternative to Google Drive and Google Sheets. Run it on one machine: a PC, a Mac, a Linux box, a
+Raspberry Pi or a NAS. Then sign in from your phone, laptop or any other device to upload, download, preview,
+edit spreadsheets, share links and organise your files.
 
 - **Your files stay as normal files** in `data/files/<username>/`, so you can back them up or open them directly.
+- **Built-in RDrive Sheets:** create and edit `.rsheet`, `.csv` and `.tsv` spreadsheets right in the browser or Android app, with formulas (`SUM`, `AVERAGE`, `IF`, `COUNTIF`, `SUMIF`, `ROUND`, cross-sheet references, etc.), multi-sheet tabs, formatting, sorting, and CSV export.
 - **Secure sign-in** with a password or **Sign in with GitHub** (single sign-on). Everything is encrypted with HTTPS.
+- **Share links:** create expiring, optionally password-protected links to any file, folder or spreadsheet (with optional collaborative editing for spreadsheets).
+- **Mount as a network drive (WebDAV):** mount `/dav/` in Windows Explorer, macOS Finder, Linux or mobile WebDAV clients.
 - **Manage your devices:** see every phone and computer signed in to your account, and sign any of them out remotely.
-- **Works on any device with a browser.** You can drag and drop files *and whole folders*, upload large files with
-  progress bars, and preview images, video, audio, text and PDFs. You can rename, move (including drag-to-folder)
+- **Works on any device with a browser.** You can drag and drop files *and whole folders*, download any folder as a `.zip`, search across your drive, upload large files with
+  progress bars, and preview images, video, audio, text and PDFs. You can rename, copy, move (including drag-to-folder)
   and delete. It has dark mode and a phone layout.
-- **Deletes are recoverable:** deleted items go to `data/trash/<username>/`.
+- **Deletes are recoverable:** deleted items go to `data/trash/<username>/` and can be restored or emptied right from the **Trash** view.
 - **Multiple users**, each with their own private space.
 - **Runs anywhere:** Docker images for x86-64 and ARM64, or plain Node.js on Windows, macOS and Linux.
 - **Desktop and Android apps:** a Windows/macOS app that hosts your drive in the background (or opens a drive hosted
-  elsewhere), and an Android app with "Share → rdrive" and automatic folder upload.
+  elsewhere), and an Android app with "Share → rdrive", "New spreadsheet…", and automatic folder upload.
 - **Small and auditable:** one runtime dependency, no database, and tested on every OS in CI.
 
 ## Apps
@@ -170,6 +173,48 @@ your public profile (your user id). It never sees your GitHub password and never
 
 Turn on two-factor authentication in your GitHub account: your rdrive is then protected by it too.
 
+## AI Agents (Model Context Protocol / MCP)
+
+Each user can grant AI agents (Claude, Antigravity, Cursor, or custom agents) scoped access to their own files and spreadsheets over the **Model Context Protocol (MCP)**—without ever sharing passwords or exposing other users' data.
+
+### Per-individual security guarantees
+- **Per-user isolation:** Every Personal Agent Token (`rdrive_pat_...`) belongs to a single rdrive user and is strictly confined to `data/files/<username>/`.
+- **Hashed on disk:** Raw tokens are shown only once when created; the server stores only their SHA-256 hashes in `data/tokens.json`.
+- **Permission scopes (`read` vs `write`):** Create a `read`-only token if the agent should only list, search, and read files/spreadsheets, or a `write` token to let it create/edit spreadsheets and files.
+- **Folder confinement:** Optionally restrict a token to a single subfolder (e.g. `/AI Workspace`) so the agent cannot see or touch anything else in your drive.
+- **Safe deletes:** Even with `write` access, `drive_trash` only moves items to your recoverable Trash—agents can never permanently delete files or empty your trash.
+
+### Connecting an AI agent
+1. In the web app, click your username → **AI Agents (MCP Server)** → **New agent token…** (or run `npm run add-token -- <username> "My Agent" write /`).
+2. Connect using **Streamable HTTP** (`/mcp`):
+   ```json
+   {
+     "mcpServers": {
+       "rdrive": {
+         "url": "https://your-machine.your-tailnet.ts.net/mcp",
+         "headers": {
+           "Authorization": "Bearer rdrive_pat_..."
+         }
+       }
+     }
+   }
+   ```
+3. Or connect over **stdio** using `mcp.js`:
+   ```json
+   {
+     "mcpServers": {
+       "rdrive": {
+         "command": "node",
+         "args": ["/path/to/rdrive/mcp.js"],
+         "env": {
+           "RDRIVE_URL": "https://your-machine.your-tailnet.ts.net",
+           "RDRIVE_TOKEN": "rdrive_pat_..."
+         }
+       }
+     }
+   }
+   ```
+
 ## Managing signed-in devices
 
 Click your name in the top-right corner. **Signed-in devices** lists each device: browser and OS, IP address, when it
@@ -244,6 +289,9 @@ data/
   trash/<user>/     deleted items (timestamp__name). Empty it by hand when you want the space back
   users.json        users, scrypt password hashes, linked GitHub ids
   sessions.json     signed-in devices (tokens are stored hashed)
+  tokens.json       AI agent (MCP) tokens: owner, scope, folder, expiry (tokens are stored hashed)
+  shares.json       share links: path, expiry, optional scrypt password hash
+  trash/<user>.meta.json  where each trashed item came from, for restore
   tls/              HTTPS certificate and private key
   peers.json        linked servers: address, pinned certificate, shared secret
   sync/             this server's sync id, what each linked server last agreed on, hash cache, partial downloads
@@ -280,17 +328,15 @@ npm test
 ```
 
 The code layout: `server.js` (routes and CLI), `lib/auth.js` (users, passwords, sessions), `lib/github.js`
-(GitHub sign-in), `lib/files.js` (file operations and path safety), `lib/sync.js` (server-to-server sync),
-`lib/tls.js` (certificates), `public/` (the web
-app: plain HTML/CSS/JS, no build step). See [CONTRIBUTING.md](CONTRIBUTING.md).
+(GitHub sign-in), `lib/files.js` (file operations, search, trash restore and path safety), `lib/shares.js`
+(expiring and password-protected share links), `lib/zip.js` (streaming folder `.zip` downloads),
+`lib/webdav.js` (WebDAV network drive mount at `/dav/`), `lib/sync.js` (server-to-server sync),
+`lib/tls.js` (certificates), `public/` (the web app and `public/sheet.js` spreadsheet editor: plain HTML/CSS/JS, no build step). See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Roadmap
 
-- Share links (expiring links to a single file)
-- Download a folder as .zip
-- Search, and a trash view with restore
-- WebDAV, so the drive can be mounted like a network drive
 - More SSO providers (generic OpenID Connect: Google, Microsoft, Authentik, Keycloak)
+- XLSX binary import/export alongside `.rsheet` and `.csv`
 
 ## License
 

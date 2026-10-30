@@ -1,6 +1,6 @@
-﻿{
+{
   "name": "rdrive",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Self-hosted, open source file drive. Run it on one machine, reach it securely from your other devices.",
   "main": "server.js",
   "scripts": {
@@ -11,6 +11,8 @@
     "unlink-github": "node server.js unlink-github",
     "passwd": "node server.js passwd",
     "set-owner": "node server.js set-owner",
+    "add-token": "node server.js add-token",
+    "mcp": "node mcp.js",
     "deluser": "node server.js deluser",
     "users": "node server.js users",
     "test": "node --test test/*.test.js"

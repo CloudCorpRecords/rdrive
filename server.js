@@ -15,10 +15,14 @@ const https = require('node:https');
 const path = require('node:path');
 const readline = require('node:readline');
 const { Auth, SESSION_TTL_MS } = require('./lib/auth');
-const { Files, HttpError } = require('./lib/files');
+const { Files, HttpError, segments } = require('./lib/files');
 const { GitHubAuth, lookupGithubUser } = require('./lib/github');
 const { loadOrCreateCert, lanAddresses } = require('./lib/tls');
 const { Sync } = require('./lib/sync');
+const { Shares, isSheetName } = require('./lib/shares');
+const { streamFolderAsZip } = require('./lib/zip');
+const { handleWebdav } = require('./lib/webdav');
+const { McpServer } = require('./lib/mcp');
 
 const DATA_DIR = path.resolve(process.env.RDRIVE_DATA || path.join(__dirname, 'data'));
 const PORT = Number(process.env.PORT || 8443);
@@ -35,6 +39,7 @@ const MAX_JSON_BYTES = 64 * 1024;
 const STATIC = {
   '/': ['index.html', 'text/html; charset=utf-8'],
   '/app.js': ['app.js', 'text/javascript; charset=utf-8'],
+  '/sheet.js': ['sheet.js', 'text/javascript; charset=utf-8'],
   '/style.css': ['style.css', 'text/css; charset=utf-8'],
   '/icon.svg': ['icon.svg', 'image/svg+xml'],
 };
@@ -48,7 +53,8 @@ const INLINE_TYPES = {
   '.mp3': 'audio/mpeg', '.wav': 'audio/wav', '.ogg': 'audio/ogg', '.m4a': 'audio/mp4', '.flac': 'audio/flac',
   '.pdf': 'application/pdf',
   '.txt': 'text/plain; charset=utf-8', '.md': 'text/plain; charset=utf-8', '.log': 'text/plain; charset=utf-8',
-  '.csv': 'text/plain; charset=utf-8', '.json': 'text/plain; charset=utf-8',
+  '.csv': 'text/plain; charset=utf-8', '.tsv': 'text/plain; charset=utf-8',
+  '.json': 'text/plain; charset=utf-8', '.rsheet': 'application/json; charset=utf-8',
 };
 
 function securityHeaders(res) {
@@ -73,13 +79,13 @@ function redirect(res, location) {
   res.end();
 }
 
-function readRawBody(req) {
+function readRawBody(req, limit = MAX_JSON_BYTES) {
   return new Promise((resolve, reject) => {
     let size = 0;
     const chunks = [];
     req.on('data', (c) => {
       size += c.length;
-      if (size > MAX_JSON_BYTES) {
+      if (size > limit) {
         reject(new HttpError(413, 'Request too large.'));
         req.destroy();
       } else chunks.push(c);
@@ -160,12 +166,38 @@ async function serveDownload(req, res, file, inline) {
   fs.createReadStream(file.full).pipe(res);
 }
 
-// options: { auth, files, github?, sync?, secureCookies?, trustProxy? }
-function createHandler({ auth, files, github = null, sync = null, secureCookies = USE_HTTPS, trustProxy = TRUST_PROXY }) {
+function defaultSheetPayload(title = 'Sheet 1') {
+  return JSON.stringify(
+    {
+      format: 'rdrive-sheet',
+      version: 1,
+      activeSheet: 0,
+      sheets: [
+        {
+          name: title,
+          rows: 50,
+          cols: 16,
+          colWidths: {},
+          frozenRows: 1,
+          cells: {},
+        },
+      ],
+    },
+    null,
+    2
+  );
+}
+
+// options: { auth, files, github?, sync?, shares?, secureCookies?, trustProxy? }
+function createHandler({ auth, files, github = null, sync = null, shares = null, secureCookies = USE_HTTPS, trustProxy = TRUST_PROXY }) {
+  if (!shares && files && files.filesDir) shares = new Shares(path.dirname(files.filesDir));
+  const mcp = new McpServer({ auth, files, shares, onChanged: () => sync && sync.localChanged() });
   const secure = secureCookies ? '; Secure' : '';
   const sessionCookie = (token, maxAgeSec) => `${COOKIE}=${token}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${maxAgeSec}${secure}`;
   // Lax, because GitHub's redirect back to us is a cross-site navigation and Strict cookies aren't sent on it.
   const oauthCookie = (nonce, maxAgeSec) => `${OAUTH_COOKIE}=${nonce}; Path=/auth/github; HttpOnly; SameSite=Lax; Max-Age=${maxAgeSec}${secure}`;
+  const shareCookieName = (id) => `rdrive_share_${id}`;
+  const shareCookie = (id, token, maxAgeSec) => `${shareCookieName(id)}=${token}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${maxAgeSec}${secure}`;
 
   const clientIp = (req) => {
     if (trustProxy && req.headers['x-forwarded-for']) {
@@ -184,12 +216,85 @@ function createHandler({ auth, files, github = null, sync = null, secureCookies 
     const cookies = parseCookies(req.headers.cookie);
     const token = cookies[COOKIE];
     const meta = { ip, userAgent: req.headers['user-agent'] };
+    const changed = () => sync && sync.localChanged();
 
     try {
-      if ((req.method === 'GET' || req.method === 'HEAD') && STATIC[route]) {
-        const [file, type] = STATIC[route];
+      if ((req.method === 'GET' || req.method === 'HEAD') && (STATIC[route] || /^\/s\/[A-Za-z0-9_-]+$/.test(route))) {
+        const [file, type] = STATIC[route] || STATIC['/'];
         res.writeHead(200, { 'Content-Type': type, 'Cache-Control': 'no-cache' });
         return res.end(req.method === 'HEAD' ? undefined : fs.readFileSync(path.join(PUBLIC_DIR, file)));
+      }
+
+      // ---- WebDAV network drive mount (/dav) ----
+      if (route === '/dav' || route.startsWith('/dav/')) {
+        return await handleWebdav(req, res, {
+          auth,
+          files,
+          ip,
+          sessionUser: auth.userForToken(token),
+          serveDownload,
+          onChanged: changed,
+        });
+      }
+
+      // ---- Model Context Protocol (MCP) for AI Agents (/mcp) ----
+      // Authenticated strictly per individual with a Personal Agent Token (Bearer rdrive_pat_...).
+      if (route === '/mcp') {
+        const wait = auth.lockedFor(ip);
+        if (wait) throw new HttpError(429, 'Too many failed attempts. Try again later.');
+        const authHeader = String(req.headers.authorization || '');
+        const bearerMatch = /^Bearer\s+(\S+)$/i.exec(authHeader);
+        const rawPat = bearerMatch ? bearerMatch[1] : String(req.headers['x-rdrive-token'] || '');
+        const tokenInfo = auth.verifyAgentToken(rawPat, ip);
+        if (!tokenInfo) {
+          if (rawPat) auth.recordFailure(ip);
+          res.writeHead(401, {
+            'WWW-Authenticate': 'Bearer realm="rdrive-mcp"',
+            'Content-Type': 'application/json; charset=utf-8',
+          });
+          return res.end(JSON.stringify({ error: 'Valid Personal Agent Token (Bearer rdrive_pat_...) required.' }));
+        }
+        if (req.method === 'GET') {
+          if ((req.headers.accept || '').includes('text/event-stream')) {
+            res.writeHead(200, {
+              'Content-Type': 'text/event-stream',
+              'Cache-Control': 'no-cache',
+              Connection: 'keep-alive',
+            });
+            res.write(': rdrive-mcp stream ready\n\n');
+            req.on('close', () => res.end());
+            return;
+          }
+          return sendJson(res, 200, {
+            name: 'rdrive-mcp',
+            user: tokenInfo.user,
+            scope: tokenInfo.scope,
+            rootPath: tokenInfo.rootPath,
+          });
+        }
+        if (req.method === 'DELETE') {
+          res.writeHead(204);
+          return res.end();
+        }
+        if (req.method === 'POST') {
+          // Agents may write whole files or spreadsheets in one call, so allow up to 4 MB here.
+          const body = parseJson(await readRawBody(req, 4 * 1024 * 1024));
+          if (Array.isArray(body)) {
+            const replies = (await Promise.all(body.map((msg) => mcp.handleJsonRpc(tokenInfo, msg)))).filter(Boolean);
+            if (!replies.length) {
+              res.writeHead(202);
+              return res.end();
+            }
+            return sendJson(res, 200, replies);
+          }
+          const reply = await mcp.handleJsonRpc(tokenInfo, body);
+          if (!reply) {
+            res.writeHead(202);
+            return res.end();
+          }
+          return sendJson(res, 200, reply);
+        }
+        throw new HttpError(405, 'Method not allowed.');
       }
 
       // ---- GitHub sign-in (browser navigations, not API calls) ----
@@ -311,21 +416,135 @@ function createHandler({ auth, files, github = null, sync = null, secureCookies 
         return sendJson(res, 200, { ok: true });
       }
 
+      // ---- Public share links (/api/public/share*) ----
+      if (route.startsWith('/api/public/share')) {
+        if (!shares) throw new HttpError(404, 'Not found.');
+        if (route === '/api/public/share/unlock' && req.method === 'POST') {
+          const wait = auth.lockedFor(ip);
+          if (wait) throw new HttpError(429, `Too many failed attempts. Try again in ${Math.ceil(wait / 60)} minute(s).`);
+          const { id, password } = await readJsonBody(req);
+          const s = shares.get(id);
+          if (!s) throw new HttpError(404, 'This share link does not exist or has expired.');
+          if (!shares.verifyPassword(id, password)) {
+            auth.recordFailure(ip);
+            throw new HttpError(401, 'Wrong password.');
+          }
+          res.setHeader('Set-Cookie', shareCookie(id, shares.unlockToken(id), 86400));
+          return sendJson(res, 200, { ok: true });
+        }
+
+        const id = q.get('id');
+        const s = shares.get(id);
+        if (!s || !auth.getUser(s.user)) throw new HttpError(404, 'This share link does not exist or has expired.');
+        const unlocked = shares.isUnlocked(id, cookies[shareCookieName(id)]);
+
+        if (route === '/api/public/share' && req.method === 'GET') {
+          const baseName = path.posix.basename(s.path);
+          if (!unlocked) return sendJson(res, 200, { id: s.id, locked: true, name: baseName });
+          const full = files.resolve(s.user, s.path);
+          const st = await files.stat(full);
+          const isDir = st.isDirectory();
+          const sub = q.get('sub') || '/';
+          const subSegs = isDir ? segments(sub) : [];
+          const subClientPath = isDir ? s.path + (subSegs.length ? '/' + subSegs.join('/') : '') : s.path;
+          return sendJson(res, 200, {
+            id: s.id,
+            locked: false,
+            name: baseName,
+            type: isDir ? 'folder' : 'file',
+            size: isDir ? null : st.size,
+            modified: st.mtime.toISOString(),
+            isSheet: !isDir && isSheetName(baseName),
+            allowEdit: !isDir && !!s.allowEdit,
+            expires: s.expires ? new Date(s.expires).toISOString() : null,
+            sub: '/' + subSegs.join('/'),
+            entries: isDir ? await files.list(s.user, subClientPath) : undefined,
+          });
+        }
+
+        if (!unlocked) throw new HttpError(401, 'Password required.');
+
+        if (route === '/api/public/share/download' && (req.method === 'GET' || req.method === 'HEAD')) {
+          const rootFull = files.resolve(s.user, s.path);
+          const rootStat = await files.stat(rootFull);
+          const subSegs = rootStat.isDirectory() ? segments(q.get('sub') || '/') : [];
+          const targetClientPath = s.path + (subSegs.length ? '/' + subSegs.join('/') : '');
+          const targetFull = files.resolve(s.user, targetClientPath);
+          const targetStat = await files.stat(targetFull);
+          if (targetStat.isDirectory()) {
+            const zipName = `${path.basename(targetFull)}.zip`;
+            res.writeHead(200, {
+              'Content-Type': 'application/zip',
+              'Content-Disposition': contentDisposition('attachment', zipName),
+              'Cache-Control': 'private, no-cache',
+            });
+            if (req.method === 'HEAD') return res.end();
+            return await streamFolderAsZip(targetFull, path.basename(targetFull), res);
+          }
+          const file = await files.fileForDownload(s.user, targetClientPath);
+          return serveDownload(req, res, file, q.get('inline') === '1');
+        }
+
+        if (route === '/api/public/share/save' && req.method === 'PUT') {
+          if (!s.allowEdit || !isSheetName(s.path)) throw new HttpError(403, 'Editing is not enabled for this share link.');
+          const segs = segments(s.path);
+          const fileName = segs.pop();
+          const dirPath = '/' + segs.join('/');
+          await files.upload(s.user, dirPath, fileName, req, { overwrite: true });
+          changed();
+          return sendJson(res, 200, { ok: true, modified: new Date().toISOString() });
+        }
+        throw new HttpError(404, 'Not found.');
+      }
+
       // ---- Everything below requires a signed-in user ----
       if (!user) throw new HttpError(401, 'Please sign in.');
 
       if (route === '/api/list' && req.method === 'GET') {
         return sendJson(res, 200, { path: q.get('path') || '/', entries: await files.list(user, q.get('path')) });
       }
+      if (route === '/api/search' && req.method === 'GET') {
+        return sendJson(res, 200, { results: await files.search(user, q.get('q')) });
+      }
       if (route === '/api/download' && (req.method === 'GET' || req.method === 'HEAD')) {
         const file = await files.fileForDownload(user, q.get('path'));
         return serveDownload(req, res, file, q.get('inline') === '1');
       }
-      const changed = () => sync && sync.localChanged();
+      if (route === '/api/zip' && (req.method === 'GET' || req.method === 'HEAD')) {
+        const p = q.get('path') || '/';
+        const full = files.resolve(user, p);
+        const st = await files.stat(full);
+        if (!st.isDirectory()) throw new HttpError(400, 'Not a folder.');
+        const baseName = p === '/' || !segments(p).length ? `${user}-drive` : path.basename(full);
+        res.writeHead(200, {
+          'Content-Type': 'application/zip',
+          'Content-Disposition': contentDisposition('attachment', `${baseName}.zip`),
+          'Cache-Control': 'private, no-cache',
+        });
+        if (req.method === 'HEAD') return res.end();
+        return await streamFolderAsZip(full, baseName, res);
+      }
       if (route === '/api/upload' && req.method === 'PUT') {
         const name = await files.upload(user, q.get('path'), q.get('name'), req, { overwrite: q.get('overwrite') === '1' });
         changed();
         return sendJson(res, 200, { name });
+      }
+      if (route === '/api/sheet/create' && req.method === 'POST') {
+        const { path: dirPath = '/', name = 'Untitled spreadsheet.rsheet', format = 'rsheet' } = await readJsonBody(req);
+        let cleanName = String(name || 'Untitled spreadsheet').trim();
+        const ext = path.extname(cleanName).toLowerCase();
+        if (format === 'csv') {
+          if (ext !== '.csv') cleanName += '.csv';
+        } else if (ext !== '.rsheet' && ext !== '.csv' && ext !== '.tsv') {
+          cleanName += '.rsheet';
+        }
+        const isCsv = cleanName.toLowerCase().endsWith('.csv') || cleanName.toLowerCase().endsWith('.tsv');
+        const initialBuf = Buffer.from(isCsv ? '' : defaultSheetPayload('Sheet 1'), 'utf8');
+        const savedName = await files.writeBuffer(user, dirPath, cleanName, initialBuf, { overwrite: false });
+        changed();
+        const normDir = '/' + segments(dirPath).join('/');
+        const fullClientPath = (normDir === '/' ? '' : normDir) + '/' + savedName;
+        return sendJson(res, 200, { name: savedName, path: fullClientPath });
       }
       if (route === '/api/mkdir' && req.method === 'POST') {
         const { path: p, name } = await readJsonBody(req);
@@ -339,11 +558,49 @@ function createHandler({ auth, files, github = null, sync = null, secureCookies 
         changed();
         return sendJson(res, 200, { ok: true });
       }
+      if (route === '/api/copy' && req.method === 'POST') {
+        const { from, to } = await readJsonBody(req);
+        const name = await files.copy(user, from, to);
+        changed();
+        return sendJson(res, 200, { ok: true, name });
+      }
       if (route === '/api/delete' && req.method === 'POST') {
         const { paths } = await readJsonBody(req);
         if (!Array.isArray(paths) || !paths.length) throw new HttpError(400, 'Nothing to delete.');
         for (const p of paths) await files.trash(user, p);
         changed();
+        return sendJson(res, 200, { ok: true });
+      }
+      if (route === '/api/trash' && req.method === 'GET') {
+        return sendJson(res, 200, { items: await files.listTrash(user) });
+      }
+      if (route === '/api/trash/restore' && req.method === 'POST') {
+        const { id } = await readJsonBody(req);
+        const restored = await files.restoreTrash(user, id);
+        changed();
+        return sendJson(res, 200, { restored });
+      }
+      if (route === '/api/trash/delete' && req.method === 'POST') {
+        const { id } = await readJsonBody(req);
+        await files.deleteTrash(user, id);
+        return sendJson(res, 200, { ok: true });
+      }
+      if (route === '/api/trash/empty' && req.method === 'POST') {
+        await files.emptyTrash(user);
+        return sendJson(res, 200, { ok: true });
+      }
+      if (route === '/api/shares' && req.method === 'GET') {
+        return sendJson(res, 200, { shares: shares.list(user, q.get('path') || null) });
+      }
+      if (route === '/api/shares' && req.method === 'POST') {
+        const { path: targetPath, expiresInHours, password, allowEdit } = await readJsonBody(req);
+        await files.stat(files.resolve(user, targetPath));
+        const share = shares.create(user, { path: targetPath, expiresInHours, password, allowEdit });
+        return sendJson(res, 200, { share });
+      }
+      if (route === '/api/shares/revoke' && req.method === 'POST') {
+        const { id } = await readJsonBody(req);
+        if (!shares.revoke(user, String(id || ''))) throw new HttpError(404, 'Share link not found.');
         return sendJson(res, 200, { ok: true });
       }
       if (route === '/api/usage' && req.method === 'GET') {
@@ -394,6 +651,24 @@ function createHandler({ auth, files, github = null, sync = null, secureCookies 
       }
       if (route === '/api/sessions/revoke-others' && req.method === 'POST') {
         auth.revokeUserSessions(user, token);
+        return sendJson(res, 200, { ok: true });
+      }
+      if (route === '/api/tokens' && req.method === 'GET') {
+        return sendJson(res, 200, { tokens: auth.listAgentTokens(user) });
+      }
+      if (route === '/api/tokens' && req.method === 'POST') {
+        const { label, scope, rootPath = '/', expiresInDays = 90 } = await readJsonBody(req);
+        const normRoot = '/' + segments(rootPath || '/').join('/');
+        if (normRoot !== '/') {
+          const st = await files.stat(files.resolve(user, normRoot));
+          if (!st.isDirectory()) throw new HttpError(400, 'Scoped path must be a folder.');
+        }
+        const created = auth.createAgentToken(user, { label, scope, rootPath: normRoot, expiresInDays });
+        return sendJson(res, 200, created);
+      }
+      if (route === '/api/tokens/revoke' && req.method === 'POST') {
+        const { id } = await readJsonBody(req);
+        if (!auth.revokeAgentToken(user, String(id || ''))) throw new HttpError(404, 'Token not found.');
         return sendJson(res, 200, { ok: true });
       }
 
@@ -496,6 +771,11 @@ async function cli(cmd, args) {
     need(name, 'set-owner <username>');
     auth.setOwner(name);
     console.log(`"${name}" is now the owner (can link servers for sync).`);
+  } else if (cmd === 'add-token') {
+    const [, label = 'CLI Agent', scope = 'write', rootPath = '/'] = args;
+    need(name, 'add-token <username> [label] [read|write] [rootPath]');
+    const { token, record } = auth.createAgentToken(name, { label, scope, rootPath, expiresInDays: 90 });
+    console.log(`Created ${record.scope} MCP token for "${name}" (root: ${record.rootPath}):\n\n  ${token}\n\nSave this token now; it is only shown once.`);
   } else if (cmd === 'deluser') {
     need(name, 'deluser <username>');
     auth.deleteUser(name);

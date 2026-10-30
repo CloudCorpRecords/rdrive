@@ -59,6 +59,11 @@ class DriveClientTest {
         assertEquals("IMG 1_2.jpg", first)
         assertEquals("IMG 1_2 (1).jpg", second)
         assertTrue(list(cookie, "/Phone uploads/Camera").containsAll(listOf(first, second)))
+
+        val sheetPath = client.createSpreadsheet("/Phone uploads", "Budget.rsheet")
+        assertEquals("/Phone uploads/Budget.rsheet", sheetPath)
+        val shareUrl = client.createShareLink(sheetPath, expiresInHours = 24, allowEdit = true)
+        assertTrue(shareUrl.startsWith("/s/"))
     }
 
     @Test

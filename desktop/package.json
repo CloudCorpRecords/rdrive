@@ -37,6 +37,7 @@
     ],
     "extraResources": [
       { "from": "../server.js", "to": "server/server.js" },
+      { "from": "../mcp.js", "to": "server/mcp.js" },
       { "from": "../package.json", "to": "server/package.json" },
       { "from": "../lib", "to": "server/lib" },
       { "from": "../public", "to": "server/public" },

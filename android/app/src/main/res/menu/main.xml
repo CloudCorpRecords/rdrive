@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <menu xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:id="@+id/new_spreadsheet" android:title="@string/menu_new_spreadsheet" android:showAsAction="never" />
     <item android:id="@+id/upload_folder" android:title="@string/menu_upload_folder" android:showAsAction="never" />
     <item android:id="@+id/upload_now" android:title="@string/menu_upload_now" android:showAsAction="never" />
     <item android:id="@+id/stop_folder" android:title="@string/menu_stop_folder" android:showAsAction="never" />
