@@ -158,6 +158,32 @@
           <button class="btn btn-danger" id="github-unlink">Unlink</button>
         </div>
       </section>
+      <section id="sync-section" hidden>
+        <div class="section-head">
+          <h3>Linked servers</h3>
+          <button class="btn small" id="sync-now">Sync now</button>
+        </div>
+        <p id="sync-status" class="muted small"></p>
+        <ul id="peer-list" class="device-list"></ul>
+        <div id="sync-owner">
+          <div class="row-actions">
+            <button class="btn" id="sync-code-btn">Show pairing code</button>
+            <button class="btn" id="sync-link-btn">Link a server…</button>
+          </div>
+          <div id="sync-code" class="sync-code" hidden>
+            <p>On the other server, choose <strong>Link a server</strong> and enter this code within 10 minutes. It works once.</p>
+            <p class="sync-code-value mono" id="sync-code-value"></p>
+            <p class="muted small">This server's certificate fingerprint: <span id="sync-fp" class="mono"></span></p>
+          </div>
+          <form id="sync-link-form" class="password-form" hidden>
+            <label>Other server's address<input name="url" placeholder="https://other-machine:8443" autocomplete="off" spellcheck="false" required></label>
+            <label>Pairing code shown there<input name="code" autocomplete="off" spellcheck="false" autocapitalize="characters" required></label>
+            <label>This server's address, as the other one reaches it<input name="selfUrl" autocomplete="off" spellcheck="false" required></label>
+            <p id="sync-error" class="error"></p>
+            <div><button class="btn btn-primary" type="submit">Link</button></div>
+          </form>
+        </div>
+      </section>
       <section>
         <h3 id="password-title">Change password</h3>
         <form id="password-form" class="password-form">

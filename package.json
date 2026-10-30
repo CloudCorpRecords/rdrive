@@ -10,6 +10,7 @@
     "link-github": "node server.js link-github",
     "unlink-github": "node server.js unlink-github",
     "passwd": "node server.js passwd",
+    "set-owner": "node server.js set-owner",
     "deluser": "node server.js deluser",
     "users": "node server.js users",
     "test": "node --test test/*.test.js"
