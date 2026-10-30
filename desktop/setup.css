@@ -1,0 +1,41 @@
+:root {
+  --bg: #f6f7f9; --surface: #fff; --border: #e2e5ea; --text: #1b1f24; --muted: #646b75;
+  --accent: #2f6fde; --accent-text: #fff; --accent-soft: #e7effc; --danger: #c93a3a;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #121418; --surface: #1a1d22; --border: #2e333b; --text: #e7e9ec; --muted: #99a1ac;
+    --accent: #5b8ff0; --accent-text: #0d1117; --accent-soft: #1f2a3d; --danger: #ef6b6b;
+    color-scheme: dark;
+  }
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+form { max-width: 560px; margin: 0 auto; padding: 24px 20px 32px; display: flex; flex-direction: column; gap: 16px; }
+header { display: flex; gap: 14px; align-items: center; }
+h1 { font-size: 20px; margin: 0; }
+p { margin: 0; }
+.muted { color: var(--muted); }
+code { font-size: 12.5px; }
+fieldset { border: 0; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 8px; }
+legend { font-weight: 600; margin-bottom: 8px; }
+.mode { display: flex; gap: 12px; padding: 14px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); cursor: pointer; }
+.mode:has(input:checked) { border-color: var(--accent); background: var(--accent-soft); }
+.mode span { display: flex; flex-direction: column; gap: 2px; }
+.field { display: flex; flex-direction: column; gap: 5px; font-weight: 500; }
+.field small { font-weight: 400; }
+input:not([type="radio"]):not([type="checkbox"]) {
+  height: 36px; padding: 0 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); color: inherit; font: inherit; width: 100%;
+}
+input:focus-visible, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.pick { display: flex; gap: 6px; }
+button { height: 36px; padding: 0 14px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); color: inherit; font: inherit; cursor: pointer; white-space: nowrap; }
+button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-text); font-weight: 600; }
+.check { display: flex; gap: 8px; align-items: center; }
+#host-fields { display: flex; flex-direction: column; gap: 16px; }
+details summary { cursor: pointer; color: var(--muted); }
+details .field { margin-top: 8px; }
+.error { color: var(--danger); min-height: 1.2em; }
+.actions { display: flex; justify-content: flex-end; }

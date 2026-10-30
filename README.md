@@ -16,7 +16,48 @@ and organise your files.
 - **Deletes are recoverable:** deleted items go to `data/trash/<username>/`.
 - **Multiple users**, each with their own private space.
 - **Runs anywhere:** Docker images for x86-64 and ARM64, or plain Node.js on Windows, macOS and Linux.
+- **Desktop and Android apps:** a Windows/macOS app that hosts your drive in the background (or opens a drive hosted
+  elsewhere), and an Android app with "Share → rdrive" and automatic folder upload.
 - **Small and auditable:** one runtime dependency, no database, and tested on every OS in CI.
+
+## Apps
+
+Download the latest builds from [Releases](https://github.com/CloudCorpRecords/rdrive/releases), or from the
+newest run of the [Apps workflow](https://github.com/CloudCorpRecords/rdrive/actions/workflows/apps.yml)
+(scroll to *Artifacts*).
+
+### Desktop app (Windows and macOS)
+
+On first launch it asks what this computer should do:
+
+- **Host my drive here:** the app runs the rdrive server in the background, starts when you log in, and sits in
+  the tray/menu bar. Your other devices connect to it. Point *Folder for your files* at an existing `data` folder to
+  keep your accounts and files. Set *Drive address* to your Tailscale address, and run `tailscale serve --bg 8443` once.
+- **Connect to my drive:** a dedicated window for a drive hosted on another computer. Enter its https address
+  (for example `https://my-pc.my-tailnet.ts.net`).
+
+The drive's window only shows your drive and GitHub's sign-in pages. Other links open in your browser, and certificate
+errors are never ignored. Change the mode later from the tray icon → *Settings…*.
+
+**macOS:** the app isn't notarized by Apple yet. The first time you open it, macOS will block it. Go to
+System Settings → Privacy & Security, scroll down, and click **Open Anyway**.
+
+### Android app
+
+- **Share → rdrive** from any app (Photos, Files, WhatsApp…). Files go to the `Phone uploads` folder. If you're
+  offline, they upload automatically when you're back online.
+- **Auto-upload a folder** (menu ⋮ → *Auto-upload a folder…*), e.g. your Camera folder. New files are uploaded to
+  `Phone/<folder>` about every 15 minutes. You choose whether files already in the folder are uploaded too. It only
+  adds files: nothing is ever deleted on the phone or the drive.
+- Browse, preview, upload and download, using the same drive as on your computer.
+
+Install it: on the phone, open your drive in the browser, download the `.apk`, and tap it. Android will ask you to
+allow installing apps from that browser. If your drive uses Tailscale, install the Tailscale app on the phone and sign
+in to the same account first.
+
+Building it yourself: `cd android && ./gradlew assembleRelease` (needs the Android SDK). To sign release builds with
+your own key, create `~/.rdrive-android/keystore.properties` with `storeFile`, `storePassword`, `keyAlias` and
+`keyPassword`. Without it, builds are signed with the debug key.
 
 ## Install
 

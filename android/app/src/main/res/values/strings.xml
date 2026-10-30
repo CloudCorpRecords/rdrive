@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">rdrive</string>
+    <string name="share_label">rdrive</string>
+    <string name="setup_title">Connect to your drive</string>
+    <string name="setup_hint">https://my-computer.my-tailnet.ts.net</string>
+    <string name="setup_help">Enter the address of your rdrive. If it uses Tailscale, install the Tailscale app on this phone and sign in to the same account first.</string>
+    <string name="setup_save">Connect</string>
+    <string name="menu_upload_folder">Auto-upload a folder…</string>
+    <string name="menu_upload_now">Upload new files now</string>
+    <string name="menu_stop_folder">Stop auto-upload</string>
+    <string name="menu_change_address">Change drive address</string>
+    <string name="menu_reload">Reload</string>
+    <string name="notif_channel">Uploads</string>
+</resources>

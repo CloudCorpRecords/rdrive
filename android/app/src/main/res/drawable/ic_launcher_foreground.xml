@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The rdrive logo (public/icon.svg), scaled 3x and centred in the 108dp adaptive-icon canvas. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <group
+        android:scaleX="3"
+        android:scaleY="3"
+        android:translateX="6"
+        android:translateY="5.25">
+        <path
+            android:fillColor="#FFFFFF"
+            android:pathData="M8,11.5a2,2 0 0,1 2,-2h4l2,2h6a2,2 0 0,1 2,2V21a2,2 0 0,1 -2,2H10a2,2 0 0,1 -2,-2z" />
+        <path
+            android:strokeColor="#2F6FDE"
+            android:strokeWidth="1.8"
+            android:strokeLineCap="round"
+            android:strokeLineJoin="round"
+            android:pathData="M16,20.5v-5.5M13.5,17.5L16,15l2.5,2.5" />
+    </group>
+</vector>

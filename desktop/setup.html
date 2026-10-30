@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self'; style-src 'self'; script-src 'self'">
+  <title>Set up rdrive</title>
+  <link rel="stylesheet" href="setup.css">
+  <script src="setup.js" defer></script>
+</head>
+<body>
+  <form id="form">
+    <header>
+      <img src="assets/icon.png" alt="" width="40" height="40">
+      <div>
+        <h1>Set up rdrive</h1>
+        <p class="muted">You can change this later from the tray icon → Settings.</p>
+      </div>
+    </header>
+
+    <fieldset class="modes">
+      <legend>What should this computer do?</legend>
+      <label class="mode">
+        <input type="radio" name="mode" value="host">
+        <span>
+          <strong>Host my drive here</strong>
+          <span class="muted">Your files are stored on this computer. rdrive runs in the background, starts when you log in, and your other devices connect to it.</span>
+        </span>
+      </label>
+      <label class="mode">
+        <input type="radio" name="mode" value="connect">
+        <span>
+          <strong>Connect to my drive</strong>
+          <span class="muted">Your drive runs on another computer. This app opens it, like a dedicated browser window.</span>
+        </span>
+      </label>
+    </fieldset>
+
+    <label class="field" id="url-field">
+      <span>Drive address</span>
+      <input name="serverUrl" placeholder="https://my-computer.my-tailnet.ts.net" autocomplete="off" spellcheck="false">
+      <small class="muted" id="url-hint">The https address your devices use, usually your Tailscale address.</small>
+    </label>
+
+    <div id="host-fields">
+      <label class="field">
+        <span>Folder for your files</span>
+        <div class="pick"><input name="dataDir" readonly><button type="button" id="pick-data">Choose…</button></div>
+        <small class="muted">rdrive keeps your files, accounts and settings here. If you already ran rdrive, choose its <code>data</code> folder to keep everything.</small>
+      </label>
+      <label class="field">
+        <span>Extra settings file (optional)</span>
+        <div class="pick"><input name="envFile" readonly placeholder="None"><button type="button" id="pick-env">Choose…</button><button type="button" id="clear-env">Clear</button></div>
+        <small class="muted">A <code>.env</code> file with your GitHub sign-in keys, if you use “Sign in with GitHub”.</small>
+      </label>
+      <label class="check"><input type="checkbox" name="startAtLogin"> Start rdrive when I log in</label>
+      <details>
+        <summary>Advanced</summary>
+        <label class="field"><span>Port on this computer</span><input name="port" type="number" min="1024" max="65535"></label>
+        <small class="muted">Tailscale should forward to this port: <code>tailscale serve --bg &lt;port&gt;</code></small>
+      </details>
+    </div>
+
+    <p id="error" class="error" role="alert"></p>
+    <div class="actions"><button type="submit" class="primary">Save and open rdrive</button></div>
+  </form>
+</body>
+</html>
