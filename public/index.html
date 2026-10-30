@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>rdrive</title>
+  <link rel="icon" href="/icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/style.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <!-- Sign in / first-time setup -->
+  <main id="auth-view" class="auth" hidden>
+    <form id="auth-form" class="auth-card">
+      <div class="brand brand-lg"><img src="/icon.svg" alt="" width="32" height="32"> rdrive</div>
+      <h1 id="auth-title">Sign in</h1>
+      <p id="auth-hint" class="muted"></p>
+      <label>Username<input name="username" autocomplete="username" autocapitalize="off" spellcheck="false" required></label>
+      <label>Password<input name="password" type="password" autocomplete="current-password" required></label>
+      <label id="confirm-row" hidden>Repeat password<input name="confirm" type="password" autocomplete="new-password"></label>
+      <p id="auth-error" class="error" role="alert"></p>
+      <button class="btn btn-primary" type="submit" id="auth-submit">Sign in</button>
+    </form>
+  </main>
+
+  <!-- The drive -->
+  <div id="drive-view" class="drive" hidden>
+    <header class="topbar">
+      <a class="brand" href="#/"><img src="/icon.svg" alt="" width="24" height="24"> rdrive</a>
+      <div class="topbar-right">
+        <span id="usage" class="muted small"></span>
+        <span id="whoami" class="chip"></span>
+        <button class="btn btn-ghost" id="logout">Sign out</button>
+      </div>
+    </header>
+
+    <div class="toolbar">
+      <nav id="crumbs" class="crumbs" aria-label="Folder path"></nav>
+      <div class="actions">
+        <div id="selection-actions" class="selection-actions" hidden>
+          <span id="selection-count" class="muted small"></span>
+          <button class="btn" id="move-selected">Move</button>
+          <button class="btn btn-danger" id="delete-selected">Delete</button>
+        </div>
+        <button class="btn" id="new-folder">New folder</button>
+        <label class="btn btn-primary" id="upload-btn">Upload<input id="file-input" type="file" multiple hidden></label>
+      </div>
+    </div>
+
+    <section class="listing" id="listing">
+      <div class="row row-head">
+        <span class="cell-check"><input type="checkbox" id="select-all" aria-label="Select all"></span>
+        <span class="cell-name">Name</span>
+        <span class="cell-size">Size</span>
+        <span class="cell-date">Modified</span>
+        <span class="cell-menu"></span>
+      </div>
+      <div id="rows"></div>
+      <div id="empty" class="empty" hidden>
+        <p><strong>This folder is empty.</strong></p>
+        <p class="muted">Drop files or folders here, or use Upload.</p>
+      </div>
+    </section>
+
+    <div id="drop-overlay" class="drop-overlay" hidden><div>Drop to upload here</div></div>
+    <aside id="uploads" class="uploads" hidden>
+      <div class="uploads-head"><strong id="uploads-title">Uploads</strong><button class="btn btn-ghost small" id="uploads-close">Close</button></div>
+      <ul id="uploads-list"></ul>
+    </aside>
+  </div>
+
+  <!-- Row menu -->
+  <div id="menu" class="menu" role="menu" hidden>
+    <button role="menuitem" data-act="open">Open</button>
+    <button role="menuitem" data-act="download">Download</button>
+    <button role="menuitem" data-act="rename">Rename</button>
+    <button role="menuitem" data-act="move">Move to…</button>
+    <button role="menuitem" data-act="delete" class="danger">Delete</button>
+  </div>
+
+  <!-- Generic text prompt -->
+  <dialog id="prompt-dialog">
+    <form method="dialog" class="dialog-body">
+      <h2 id="prompt-title"></h2>
+      <input id="prompt-input" autocomplete="off" spellcheck="false">
+      <p id="prompt-error" class="error"></p>
+      <div class="dialog-actions">
+        <button class="btn" value="cancel" formnovalidate>Cancel</button>
+        <button class="btn btn-primary" value="ok" id="prompt-ok">OK</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Confirm -->
+  <dialog id="confirm-dialog">
+    <form method="dialog" class="dialog-body">
+      <h2 id="confirm-title"></h2>
+      <p id="confirm-text" class="muted"></p>
+      <div class="dialog-actions">
+        <button class="btn" value="cancel">Cancel</button>
+        <button class="btn btn-danger" value="ok" id="confirm-ok">OK</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Folder picker for Move -->
+  <dialog id="move-dialog">
+    <form method="dialog" class="dialog-body">
+      <h2 id="move-title">Move to…</h2>
+      <nav id="move-crumbs" class="crumbs crumbs-sm"></nav>
+      <ul id="move-folders" class="folder-pick"></ul>
+      <p id="move-error" class="error"></p>
+      <div class="dialog-actions">
+        <button class="btn" value="cancel">Cancel</button>
+        <button class="btn btn-primary" value="ok" id="move-ok">Move here</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Preview -->
+  <dialog id="preview-dialog" class="preview">
+    <div class="preview-head">
+      <strong id="preview-name"></strong>
+      <div>
+        <a class="btn" id="preview-download">Download</a>
+        <button class="btn btn-ghost" id="preview-close">Close</button>
+      </div>
+    </div>
+    <div id="preview-body" class="preview-body"></div>
+  </dialog>
+
+  <div id="toast" class="toast" role="status" hidden></div>
+</body>
+</html>

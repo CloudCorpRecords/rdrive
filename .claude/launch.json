@@ -1,0 +1,12 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "rdrive",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["server.js"],
+      "port": 8443,
+      "url": "https://localhost:8443"
+    }
+  ]
+}
