@@ -52,7 +52,7 @@ jobs:
         with:
           distribution: temurin
           java-version: 21
-      - uses: android-actions/setup-android@v3
+      # The ubuntu runner already ships the Android SDK (ANDROID_HOME); Gradle fetches any missing platform.
       - name: Build and unit-test
         working-directory: android
         run: ./gradlew --no-daemon testDebugUnitTest assembleRelease
