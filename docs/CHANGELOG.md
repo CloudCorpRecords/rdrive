@@ -3,7 +3,9 @@
 Write what changed under a new `## x.y.z` heading at the top, then run `npm run release -- x.y.z`.
 The section becomes the release notes.
 
-## 0.5.0
+## 0.5.1
+
+The first release that updates itself. (0.5.0 was never published: its Mac build only made the Apple silicon `.dmg`.)
 
 - **Updates itself.** The desktop app checks GitHub for new versions, downloads them in the background, checks
   them against the release's `SHA256SUMS.txt`, and installs them. A drive hosted on the computer updates and
