@@ -10,6 +10,7 @@
 //   node server.js deluser NAME             remove a user (their files stay on disk)
 //   node server.js users                    list users
 const fs = require('node:fs');
+const fsp = fs.promises;
 const http = require('node:http');
 const https = require('node:https');
 const path = require('node:path');
@@ -22,7 +23,9 @@ const { Sync } = require('./lib/sync');
 const { Shares, isSheetName, isDocName, isEditableName } = require('./lib/shares');
 const { streamFolderAsZip } = require('./lib/zip');
 const { handleWebdav } = require('./lib/webdav');
-const { McpServer } = require('./lib/mcp');
+const { McpServer, generateLlmsTxt } = require('./lib/mcp');
+const { DevicePairing } = require('./lib/pair');
+const { rdocToMarkdown, isRdocName } = require('./lib/rdoc');
 
 const DATA_DIR = path.resolve(process.env.RDRIVE_DATA || path.join(__dirname, 'data'));
 const PORT = Number(process.env.PORT || 8443);
@@ -47,6 +50,7 @@ const STATIC = {
   '/vendor/jszip.min.js': ['vendor/jszip.min.js', 'text/javascript; charset=utf-8'],
   '/vendor/mammoth.browser.min.js': ['vendor/mammoth.browser.min.js', 'text/javascript; charset=utf-8'],
   '/vendor/docx.iife.js': ['vendor/docx.iife.js', 'text/javascript; charset=utf-8'],
+  '/vendor/qrcode.js': ['vendor/qrcode.js', 'text/javascript; charset=utf-8'],
   '/style.css': ['style.css', 'text/css; charset=utf-8'],
   '/icon.svg': ['icon.svg', 'image/svg+xml'],
 };
@@ -196,9 +200,10 @@ function defaultSheetPayload(title = 'Sheet 1') {
   );
 }
 
-// options: { auth, files, github?, sync?, shares?, secureCookies?, trustProxy? }
-function createHandler({ auth, files, github = null, sync = null, shares = null, secureCookies = USE_HTTPS, trustProxy = TRUST_PROXY }) {
+// options: { auth, files, github?, sync?, shares?, pairing?, secureCookies?, trustProxy? }
+function createHandler({ auth, files, github = null, sync = null, shares = null, pairing = null, secureCookies = USE_HTTPS, trustProxy = TRUST_PROXY }) {
   if (!shares && files && files.filesDir) shares = new Shares(path.dirname(files.filesDir));
+  if (!pairing) pairing = new DevicePairing();
   const mcp = new McpServer({ auth, files, shares, onChanged: () => sync && sync.localChanged() });
   const secure = secureCookies ? '; Secure' : '';
   const sessionCookie = (token, maxAgeSec) => `${COOKIE}=${token}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${maxAgeSec}${secure}`;
@@ -215,6 +220,16 @@ function createHandler({ auth, files, github = null, sync = null, shares = null,
     return req.socket.remoteAddress || 'unknown';
   };
 
+  // The address other devices and AI agents should use. Prefer the configured public URL over headers.
+  const publicOrigin = (req) => {
+    const configured = String(process.env.RDRIVE_PUBLIC_URL || '').replace(/\/+$/, '');
+    if (/^https?:\/\/[^/]+$/i.test(configured)) return configured;
+    const fwd = trustProxy && String(req.headers['x-forwarded-proto'] || '').split(',')[0].trim();
+    const proto = fwd === 'https' || fwd === 'http' ? fwd : USE_HTTPS ? 'https' : 'http';
+    const host = /^[A-Za-z0-9.:[\]-]+$/.test(req.headers.host || '') ? req.headers.host : `${HOST}:${PORT}`;
+    return `${proto}://${host}`;
+  };
+
   return async function handle(req, res) {
     securityHeaders(res);
     const url = new URL(req.url, 'http://x');
@@ -227,10 +242,43 @@ function createHandler({ auth, files, github = null, sync = null, shares = null,
     const changed = () => sync && sync.localChanged();
 
     try {
-      if ((req.method === 'GET' || req.method === 'HEAD') && (STATIC[route] || /^\/s\/[A-Za-z0-9_-]+$/.test(route))) {
+      if ((req.method === 'GET' || req.method === 'HEAD') && (STATIC[route] || route === '/pair' || /^\/s\/[A-Za-z0-9_-]+$/.test(route))) {
         const [file, type] = STATIC[route] || STATIC['/'];
         res.writeHead(200, { 'Content-Type': type, 'Cache-Control': 'no-cache' });
         return res.end(req.method === 'HEAD' ? undefined : fs.readFileSync(path.join(PUBLIC_DIR, file)));
+      }
+
+      // ---- AI overview guide (/llms.txt) ----
+      if (route === '/llms.txt' && (req.method === 'GET' || req.method === 'HEAD')) {
+        const body = generateLlmsTxt({ origin: publicOrigin(req) });
+        res.writeHead(200, {
+          'Content-Type': 'text/markdown; charset=utf-8',
+          'Cache-Control': 'public, max-age=3600',
+        });
+        return res.end(req.method === 'HEAD' ? undefined : body);
+      }
+
+      // ---- Public share direct markdown (/s/:id.md) ----
+      const mdShareMatch = /^\/s\/([A-Za-z0-9_-]+)\.md$/.exec(route);
+      if (mdShareMatch && (req.method === 'GET' || req.method === 'HEAD')) {
+        if (!shares) throw new HttpError(404, 'Not found.');
+        const shareId = mdShareMatch[1];
+        const s = shares.get(shareId);
+        if (!s || !auth.getUser(s.user)) throw new HttpError(404, 'This share link does not exist or has expired.');
+        const unlocked = shares.isUnlocked(shareId, cookies[shareCookieName(shareId)]);
+        if (!unlocked) throw new HttpError(401, 'Password required.');
+        const file = await files.fileForDownload(s.user, s.path);
+        if (!isRdocName(file.name) && !/\.(md|markdown|txt)$/i.test(file.name)) {
+          throw new HttpError(415, 'Only documents and text files have a Markdown version.');
+        }
+        if (file.size > 2 * 1024 * 1024) throw new HttpError(413, 'This document is too large to show as Markdown.');
+        const raw = await fsp.readFile(file.full, 'utf8');
+        const mdText = isRdocName(file.name) ? rdocToMarkdown(raw) : raw;
+        res.writeHead(200, {
+          'Content-Type': 'text/markdown; charset=utf-8',
+          'Cache-Control': 'private, no-cache',
+        });
+        return res.end(req.method === 'HEAD' ? undefined : mdText);
       }
 
       // ---- WebDAV network drive mount (/dav) ----
@@ -424,6 +472,38 @@ function createHandler({ auth, files, github = null, sync = null, shares = null,
         return sendJson(res, 200, { ok: true });
       }
 
+      // ---- Device pairing (unauthenticated side) ----
+      if (route === '/api/pair/claim' && req.method === 'POST') {
+        const wait = auth.lockedFor(ip);
+        if (wait) throw new HttpError(429, `Too many failed attempts. Try again in ${Math.ceil(wait / 60)} minute(s).`);
+        const { token: linkToken } = await readJsonBody(req);
+        const claimed = pairing.claimLinkToken(linkToken);
+        if (!claimed || !auth.getUser(claimed.user)) {
+          auth.recordFailure(ip);
+          throw new HttpError(400, 'Invalid or expired pairing link.');
+        }
+        const t = auth.createSession(claimed.user, { ...meta, method: 'pair-link' });
+        res.setHeader('Set-Cookie', sessionCookie(t, SESSION_TTL_MS / 1000));
+        return sendJson(res, 200, { ok: true, user: claimed.user });
+      }
+      if (route === '/api/pair/request' && req.method === 'POST') {
+        const wait = auth.lockedFor(ip);
+        if (wait) throw new HttpError(429, `Too many failed attempts. Try again in ${Math.ceil(wait / 60)} minute(s).`);
+        const codeReq = pairing.createCodeRequest(ip);
+        if (!codeReq) throw new HttpError(429, 'Too many sign-in codes waiting. Try again in a few minutes.');
+        return sendJson(res, 200, codeReq);
+      }
+      if (route === '/api/pair/status' && req.method === 'GET') {
+        const status = pairing.checkCodeStatus(q.get('id'));
+        if (status.status === 'approved' && auth.getUser(status.user)) {
+          // The session is made here, for the device that asked, not when the code was approved.
+          const t = auth.createSession(status.user, { ...meta, method: 'pair-code' });
+          res.setHeader('Set-Cookie', sessionCookie(t, SESSION_TTL_MS / 1000));
+          return sendJson(res, 200, { status: 'approved', user: status.user });
+        }
+        return sendJson(res, 200, { status: status.status === 'pending' ? 'pending' : 'expired' });
+      }
+
       // ---- Public share links (/api/public/share*) ----
       if (route.startsWith('/api/public/share')) {
         if (!shares) throw new HttpError(404, 'Not found.');
@@ -508,6 +588,20 @@ function createHandler({ auth, files, github = null, sync = null, shares = null,
 
       // ---- Everything below requires a signed-in user ----
       if (!user) throw new HttpError(401, 'Please sign in.');
+
+      // ---- Device pairing (authenticated side) ----
+      if (route === '/api/pair/link' && req.method === 'POST') {
+        const linkToken = pairing.createLinkToken(user, meta);
+        const origin = publicOrigin(req);
+        const pairUrl = `${origin}/pair#${linkToken}`;
+        const appUri = `rdrive://pair?url=${encodeURIComponent(origin)}&token=${linkToken}`;
+        return sendJson(res, 200, { token: linkToken, url: pairUrl, appUri, expiresIn: 300 });
+      }
+      if (route === '/api/pair/approve' && req.method === 'POST') {
+        const { code } = await readJsonBody(req);
+        if (!pairing.approveCode(code, user)) throw new HttpError(400, 'Invalid, expired, or already used code.');
+        return sendJson(res, 200, { ok: true });
+      }
 
       if (route === '/api/list' && req.method === 'GET') {
         return sendJson(res, 200, { path: q.get('path') || '/', entries: await files.list(user, q.get('path')) });

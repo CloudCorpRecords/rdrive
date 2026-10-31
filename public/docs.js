@@ -213,6 +213,21 @@
       exportSelect.value = '';
       if (!choice) return;
       if (choice === 'pdf') return printDoc();
+      if (choice === 'clip:md') {
+        const interop = I();
+        const clean = interop.sanitizeHtml(editor.innerHTML);
+        const md = interop.htmlToMarkdown(clean);
+        if (window.rdriveCopy) {
+          await window.rdriveCopy(md, 'Copied Markdown for AI to clipboard!');
+        } else if (navigator.clipboard && navigator.clipboard.writeText) {
+          await navigator.clipboard.writeText(md);
+          toast('Copied Markdown for AI to clipboard!');
+        } else {
+          prompt('Copy Markdown:', md);
+        }
+        status.textContent = 'Copied Markdown for AI';
+        return;
+      }
       const [mode, kind] = choice.split(':');
       const fileName = `${baseName(name)}.${kind}`;
       status.textContent = `Preparing ${EXPORTS[kind].label} file…`;

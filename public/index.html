@@ -9,6 +9,7 @@
   <script src="/interop.js" defer></script>
   <script src="/sheet.js" defer></script>
   <script src="/docs.js" defer></script>
+  <script src="/vendor/qrcode.js" defer></script>
   <script src="/app.js" defer></script>
 </head>
 <body>
@@ -30,7 +31,37 @@
       <label id="confirm-row" hidden>Repeat password<input name="confirm" type="password" autocomplete="new-password"></label>
       <p id="auth-error" class="error" role="alert"></p>
       <button class="btn btn-primary" type="submit" id="auth-submit">Sign in</button>
+      <div id="auth-pair-opt" class="pair-alt">
+        <button class="btn btn-ghost small" id="auth-pair-btn" type="button">Sign in with another device</button>
+      </div>
     </form>
+
+    <!-- Sign in with another device card -->
+    <div id="pair-request-card" class="auth-card" hidden>
+      <div class="brand brand-lg"><img src="/icon.svg" alt="" width="32" height="32"> rdrive</div>
+      <h1>Sign in with another device</h1>
+      <p class="muted">On a phone or computer where you're already signed in to rdrive:</p>
+      <ol class="pair-steps">
+        <li>Open <strong>rdrive</strong> and tap <strong>You (Account)</strong>.</li>
+        <li>Under <strong>Signed-in devices</strong>, tap <strong>+ Connect a device</strong>.</li>
+        <li>Enter this approval code:</li>
+      </ol>
+      <div class="pair-code-display mono" id="pair-request-code">----</div>
+      <p class="pair-status-line" id="pair-request-status"><span class="spinner-dot"></span> Waiting for approval on your other device…</p>
+      <div class="dialog-actions pair-actions">
+        <button class="btn" id="pair-request-cancel" type="button">Use password instead</button>
+      </div>
+    </div>
+
+    <!-- Pair claim card for /pair#<token> -->
+    <div id="pair-claim-card" class="auth-card" hidden>
+      <div class="brand brand-lg"><img src="/icon.svg" alt="" width="32" height="32"> rdrive</div>
+      <h1 id="pair-claim-title">Connecting this device…</h1>
+      <p id="pair-claim-msg" class="muted">Please wait while your session is established.</p>
+      <div id="pair-claim-actions" class="dialog-actions pair-actions" hidden>
+        <button class="btn btn-primary" id="pair-claim-retry" type="button">Go to sign in</button>
+      </div>
+    </div>
   </main>
 
   <!-- Public share view (/s/:id) -->
@@ -339,6 +370,9 @@
             <option value="dl:txt">Plain text (.txt)</option>
             <option value="pdf">PDF / Print…</option>
           </optgroup>
+          <optgroup label="For AI &amp; Clipboard">
+            <option value="clip:md">Copy for AI (Markdown)</option>
+          </optgroup>
           <optgroup label="Save a copy in this folder" data-copy-group>
             <option value="copy:docx" data-copy>as Word (.docx)</option>
             <option value="copy:odt" data-copy>as OpenDocument (.odt)</option>
@@ -411,18 +445,67 @@
       <section id="phone-section" hidden>
         <h3>This phone</h3>
         <div class="phone-actions">
-          <button class="phone-action" type="button" data-phone="autoUpload"><span data-icon="camera"></span><span><strong>Auto-upload a folder</strong><span class="muted small" id="phone-sync-status"></span></span></button>
-          <button class="phone-action" type="button" data-phone="uploadNow" id="phone-upload-now"><span data-icon="upload"></span><span><strong>Upload new photos now</strong></span></button>
-          <button class="phone-action" type="button" data-phone="stopAutoUpload" id="phone-stop"><span data-icon="trash"></span><span><strong>Stop auto-upload</strong></span></button>
-          <button class="phone-action" type="button" data-phone="checkForUpdates"><span data-icon="download"></span><span><strong>Check for updates</strong><span class="muted small" id="phone-version"></span></span></button>
-          <button class="phone-action" type="button" data-phone="changeAddress"><span data-icon="edit"></span><span><strong>Change drive address</strong></span></button>
+          <button class="phone-action" type="button" data-phone="autoUpload">
+            <span data-icon="cloud"></span>
+            <span>
+              <strong id="phone-backup-title">Cloud backup</strong>
+              <span class="muted small" id="phone-sync-status">Off · Tap to back up Camera or a folder to /Backups</span>
+            </span>
+          </button>
+          <button class="phone-action" type="button" data-phone="uploadNow" id="phone-upload-now">
+            <span data-icon="upload"></span>
+            <span><strong>Back up now</strong><span class="muted small">Sync new photos &amp; files immediately</span></span>
+          </button>
+          <button class="phone-action" type="button" data-phone="openBackups" id="phone-open-backups">
+            <span data-icon="folder"></span>
+            <span><strong>View backups on drive</strong><span class="muted small" id="phone-backup-path">/Backups</span></span>
+          </button>
+          <button class="phone-action" type="button" data-phone="stopAutoUpload" id="phone-stop">
+            <span data-icon="trash"></span>
+            <span><strong>Stop phone backup</strong></span>
+          </button>
+          <button class="phone-action" type="button" data-phone="checkForUpdates">
+            <span data-icon="download"></span>
+            <span><strong>Check for updates</strong><span class="muted small" id="phone-version"></span></span>
+          </button>
+          <button class="phone-action" type="button" data-phone="changeAddress">
+            <span data-icon="edit"></span>
+            <span><strong>Change drive address</strong></span>
+          </button>
         </div>
       </section>
       <section>
         <div class="section-head">
           <h3>Signed-in devices</h3>
-          <button class="btn small btn-danger" id="revoke-others">Sign out all others</button>
+          <div class="row-actions">
+            <button class="btn small btn-primary" id="pair-open-btn" type="button">+ Connect a device</button>
+            <button class="btn small btn-danger" id="revoke-others">Sign out all others</button>
+          </div>
         </div>
+
+        <div id="pair-box" class="sync-code" hidden>
+          <div class="section-head">
+            <strong>Connect another device</strong>
+            <button class="btn btn-ghost small" id="pair-close-btn" type="button">Close</button>
+          </div>
+          <p class="muted small">Scan with your phone camera or open the link on another device to sign in instantly without entering your password:</p>
+          <div id="pair-qr" class="pair-qr-wrap"></div>
+          <div class="row-actions pair-row">
+            <input id="pair-link-input" class="mono small grow" readonly>
+            <button class="btn small" id="pair-link-copy" type="button">Copy link</button>
+          </div>
+          <p class="muted small" id="pair-timer"></p>
+
+          <hr class="pair-divider">
+
+          <strong>Or approve a code from another device:</strong>
+          <form id="pair-approve-form" class="row-actions pair-row">
+            <input name="code" placeholder="e.g. ABCD-1234" maxlength="9" autocomplete="off" spellcheck="false" autocapitalize="characters" class="mono grow" required>
+            <button class="btn btn-primary small" type="submit">Approve</button>
+          </form>
+          <p id="pair-approve-error" class="error"></p>
+        </div>
+
         <ul id="device-list" class="device-list"></ul>
       </section>
       <section>
@@ -435,10 +518,61 @@
       </section>
       <section>
         <div class="section-head">
-          <h3>AI Agents (MCP Server)</h3>
-          <button class="btn small" id="mcp-new-btn" type="button">New agent token…</button>
+          <h3>AI Agents &amp; Assistants</h3>
+          <div class="row-actions">
+            <button class="btn small btn-primary" id="ai-quick-connect-btn" type="button">Connect an AI…</button>
+            <button class="btn small" id="mcp-new-btn" type="button">New agent token…</button>
+          </div>
         </div>
-        <p class="muted small">Give an AI agent (Claude, Antigravity, Cursor) scoped access to <strong>only your personal drive</strong> (or a single folder inside it) over the Model Context Protocol (<code class="mono">/mcp</code>).</p>
+        <p class="muted small">Give Claude, Cursor, Antigravity, or other AI assistants secure access to read and write your files and RDocs documents over MCP or direct Markdown links.</p>
+
+        <div id="ai-connect-card" class="sync-code" hidden>
+          <div class="section-head">
+            <strong>One-click AI Connect</strong>
+            <button class="btn btn-ghost small" id="ai-connect-close" type="button">Close</button>
+          </div>
+          <div id="ai-connect-step1">
+            <p class="muted small">What should the AI be allowed to do? This makes a key that works for 90 days; you can revoke it below any time.</p>
+            <div class="row-actions ai-choices">
+              <button class="btn small btn-primary" type="button" data-ai-scope="write">Read and edit my files</button>
+              <button class="btn small" type="button" data-ai-scope="read">Only read</button>
+            </div>
+          </div>
+          <div id="ai-tab-content-wrap" hidden>
+          <p class="muted small">Pick your tool and copy its setup. The key is only shown here, once.</p>
+          <div class="row-actions ai-choices">
+            <button class="btn small active" id="ai-tab-claude-code" type="button">Claude Code</button>
+            <button class="btn small" id="ai-tab-claude-desktop" type="button">Claude Desktop</button>
+            <button class="btn small" id="ai-tab-cursor" type="button">Cursor</button>
+            <button class="btn small" id="ai-tab-llms" type="button">Any other AI</button>
+          </div>
+          <div id="ai-tab-content">
+            <div id="ai-pane-claude-code">
+              <p class="small muted">Run this command in your terminal:</p>
+              <pre class="mono chip ai-snippet" id="ai-claude-code-cmd"></pre>
+              <button class="btn small" id="ai-copy-claude-code" type="button">Copy command</button>
+            </div>
+            <div id="ai-pane-claude-desktop" hidden>
+              <p class="small muted">Add to your <code class="mono">claude_desktop_config.json</code>:</p>
+              <pre class="mono chip ai-snippet" id="ai-claude-desktop-cfg"></pre>
+              <button class="btn small" id="ai-copy-claude-desktop" type="button">Copy JSON</button>
+            </div>
+            <div id="ai-pane-cursor" hidden>
+              <p class="small muted">Add to your project's <code class="mono">.cursor/mcp.json</code>:</p>
+              <pre class="mono chip ai-snippet" id="ai-cursor-cfg"></pre>
+              <button class="btn small" id="ai-copy-cursor" type="button">Copy Cursor config</button>
+            </div>
+            <div id="ai-pane-llms" hidden>
+              <p class="small muted">Paste these instructions into any AI chat. They point it at the plain-English guide, <a href="/llms.txt" target="_blank" class="mono">/llms.txt</a>, which lists everything it can do:</p>
+              <div class="row-actions pair-row">
+                <code class="mono chip" id="ai-llms-url"></code>
+                <button class="btn small" id="ai-copy-llms" type="button">Copy instructions for the AI</button>
+              </div>
+            </div>
+          </div>
+          </div>
+        </div>
+
         <form id="mcp-token-form" class="password-form" hidden>
           <label>Agent label<input name="label" placeholder="e.g. Claude Desktop" required></label>
           <label>Permissions

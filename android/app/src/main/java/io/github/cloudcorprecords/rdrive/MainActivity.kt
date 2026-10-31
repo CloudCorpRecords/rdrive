@@ -38,6 +38,8 @@ class MainActivity : Activity() {
     private var fileCallback: ValueCallback<Array<Uri>>? = null
     private var cameraOutput: Uri? = null
 
+    private var pendingPairUrl: String? = null
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         cleanOldOutbox()
@@ -47,6 +49,45 @@ class MainActivity : Activity() {
             onBackInvokedDispatcher.registerOnBackInvokedCallback(OnBackInvokedDispatcher.PRIORITY_DEFAULT) { goBack() }
         }
         if (Prefs.serverUrl(this) == null) showSetup() else showDrive(savedInstanceState)
+        handlePairIntent(intent)
+    }
+
+    override fun onNewIntent(intent: Intent?) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handlePairIntent(intent)
+    }
+
+    // rdrive://pair?url=<drive>&token=<one-time token>, from a "Connect a device" link. Any app or web
+    // page can open such a link, so switching to a different drive is always confirmed first.
+    private fun handlePairIntent(intent: Intent?) {
+        val data = intent?.data ?: return
+        if (data.scheme != "rdrive" || data.host != "pair") return
+        val server = data.getQueryParameter("url")?.let(Prefs::normalizeUrl) ?: return
+        val token = data.getQueryParameter("token")?.takeIf { it.matches(Regex("^[0-9a-f]{64}$")) } ?: return
+        intent.data = null // don't act on it again after rotation
+        val current = Prefs.serverUrl(this)
+        if (current == null || current == server) {
+            openPairLink(server, token)
+            return
+        }
+        AlertDialog.Builder(this)
+            .setTitle("Switch drives?")
+            .setMessage("This link signs you in to a different drive:\n\n${Uri.parse(server).host}\n\nOnly continue if you made this link yourself.")
+            .setPositiveButton("Switch") { _, _ -> openPairLink(server, token) }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
+    }
+
+    private fun openPairLink(server: String, token: String) {
+        Prefs.setServerUrl(this, server)
+        val target = "$server/pair#$token"
+        if (web != null && Uri.parse(web?.url ?: "").host == Uri.parse(server).host) {
+            web?.loadUrl(target)
+        } else {
+            pendingPairUrl = target
+            showDrive(null)
+        }
     }
 
     // ---------- setup screen ----------
@@ -76,7 +117,15 @@ class MainActivity : Activity() {
         val save = Button(this).apply {
             text = getString(R.string.setup_save)
             setOnClickListener {
-                val url = Prefs.normalizeUrl(input.text.toString())
+                val raw = input.text.toString().trim()
+                // A pasted "Connect a device" link (https://drive/pair#token) sets the address and signs in.
+                val pairToken = Regex("/pair#([0-9a-f]{64})$").find(raw)?.groupValues?.get(1)
+                val pairServer = pairToken?.let { Prefs.normalizeUrl(raw) }
+                if (pairToken != null && pairServer != null) {
+                    openPairLink(pairServer, pairToken)
+                    return@setOnClickListener
+                }
+                val url = Prefs.normalizeUrl(raw)
                 if (url == null) {
                     input.error = "Enter an https:// address"
                 } else {
@@ -181,14 +230,18 @@ class MainActivity : Activity() {
         }
         w.addJavascriptInterface(PhoneBridge(host), "RDriveApp")
         w.setBackgroundColor(getColor(R.color.page_bg)) // no white flash before the page paints
-        // WebView ignores its own padding, so the system-bar spacing goes on a container around it.
+        // WebView ignores its own padding, so the status-bar spacing goes on a container around it.
+        // The drive page manages bottom-bar spacing with CSS env(safe-area-inset-bottom), so we
+        // don't pad the bottom here—otherwise the nav space is reserved twice.
         val frame = android.widget.FrameLayout(this).apply {
             setBackgroundColor(getColor(R.color.page_bg))
             addView(w, ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
         }
         setContentView(frame)
-        applyInsets(frame)
-        if (state == null || w.restoreState(state) == null) w.loadUrl(url)
+        applyInsets(frame, padBottom = false)
+        val startUrl = pendingPairUrl ?: url
+        pendingPairUrl = null
+        if (state == null || w.restoreState(state) == null) w.loadUrl(startUrl)
     }
 
     private fun isGithubSignIn(u: Uri): Boolean {
@@ -198,7 +251,7 @@ class MainActivity : Activity() {
 
     // There's no title bar: the page draws its own header. Keep it clear of the status and navigation
     // bars (Android 15+ draws edge to edge), and match the bar icons to light or dark mode.
-    private fun applyInsets(v: View) {
+    private fun applyInsets(v: View, padBottom: Boolean = true) {
         window.decorView.setBackgroundColor(getColor(R.color.page_bg))
         if (Build.VERSION.SDK_INT >= 30) {
             val night = (resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK) == android.content.res.Configuration.UI_MODE_NIGHT_YES
@@ -208,7 +261,9 @@ class MainActivity : Activity() {
         if (Build.VERSION.SDK_INT < 30) return
         v.setOnApplyWindowInsetsListener { view, insets ->
             val bars = insets.getInsets(android.view.WindowInsets.Type.systemBars() or android.view.WindowInsets.Type.ime())
-            view.setPadding(bars.left, bars.top, bars.right, bars.bottom)
+            // Without bottom padding the keyboard still needs room, or it would cover what you type.
+            val ime = insets.getInsets(android.view.WindowInsets.Type.ime()).bottom
+            view.setPadding(bars.left, bars.top, bars.right, if (padBottom) bars.bottom else ime)
             insets
         }
         (v.parent as? ViewGroup)?.requestApplyInsets()
@@ -353,7 +408,22 @@ class MainActivity : Activity() {
         fun status(): String {
             val tree = Prefs.syncTree(this@MainActivity)
             val folder = tree?.let { DocumentsContract.getTreeDocumentId(it).substringAfter(':').substringAfterLast('/').ifBlank { "Phone storage" } }
-            return JSONObject().put("syncFolder", folder ?: JSONObject.NULL).put("version", Updater.currentVersion(this@MainActivity)).toString()
+            val device = FolderSyncWorker.getDeviceName()
+            val backupPath = "/Backups/$device"
+            return JSONObject()
+                .put("syncFolder", folder ?: JSONObject.NULL)
+                .put("deviceName", device)
+                .put("backupPath", backupPath)
+                .put("version", Updater.currentVersion(this@MainActivity))
+                .toString()
+        }
+
+        @JavascriptInterface
+        fun openBackups() = fromDrive {
+            val device = FolderSyncWorker.getDeviceName()
+            val path = "/Backups/$device"
+            val quoted = JSONObject.quote(path)
+            web?.evaluateJavascript("(function(){ if(window.navigate) navigate($quoted); var d = document.getElementById('account-dialog'); if(d) d.close(); })()", null)
         }
 
         @JavascriptInterface
@@ -420,10 +490,14 @@ class MainActivity : Activity() {
                 if (resultCode != RESULT_OK) return
                 contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
                 Prefs.setSyncTree(this, uri)
+                val device = FolderSyncWorker.getDeviceName()
+                val rootId = DocumentsContract.getTreeDocumentId(uri)
+                val folder = rootId.substringAfter(':').substringAfterLast('/').ifBlank { "Folder" }
+                val msg = "Files in \"$folder\" will be backed up to:\n\n/Backups/$device/$folder/\n\nPhotos are organized by month (e.g. 2026-10). Backups run every 15 minutes when online.\n\nAlso back up existing files?"
                 AlertDialog.Builder(this)
-                    .setTitle("Auto-upload this folder")
-                    .setMessage("New files in this folder will be uploaded to rdrive → Phone, about every 15 minutes when you're online.\n\nAlso upload the files that are already in it?")
-                    .setPositiveButton("Upload existing too") { _, _ -> FolderSyncWorker.start(this, uploadExisting = true) }
+                    .setTitle("Cloud backup for $device")
+                    .setMessage(msg)
+                    .setPositiveButton("Back up existing too") { _, _ -> FolderSyncWorker.start(this, uploadExisting = true) }
                     .setNegativeButton("Only new files") { _, _ -> FolderSyncWorker.start(this, uploadExisting = false) }
                     .setCancelable(false)
                     .show()

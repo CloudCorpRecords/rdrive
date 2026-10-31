@@ -84,6 +84,14 @@ $('pick-env').addEventListener('click', async () => {
 });
 $('clear-env').addEventListener('click', () => (form.envFile.value = ''));
 
+form.serverUrl.addEventListener('input', () => {
+  const val = form.serverUrl.value.trim();
+  if (val.includes('/pair')) {
+    form.mode.value = 'connect';
+    syncMode();
+  }
+});
+
 form.addEventListener('submit', async (e) => {
   e.preventDefault();
   $('error').textContent = '';

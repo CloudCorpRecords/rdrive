@@ -79,6 +79,7 @@ async function copyText(text, label = 'Copied to clipboard.') {
     prompt('Copy this address:', text);
   }
 }
+window.rdriveCopy = copyText;
 
 function extOf(name) {
   return String(name || '').split('.').pop().toLowerCase();
@@ -161,6 +162,9 @@ const UI_ICONS = {
   edit: 'M4.5 19.5h4l10-10-4-4-10 10zM13 7l4 4',
   move: 'M4 7.5A2.5 2.5 0 0 1 6.5 5H9l2 2h6.5A2.5 2.5 0 0 1 20 9.5v7a2.5 2.5 0 0 1-2.5 2.5h-11A2.5 2.5 0 0 1 4 16.5zM9.5 13h6M13 10.5l2.5 2.5-2.5 2.5',
   more: 'M6 12h.01M12 12h.01M18 12h.01',
+  cloud: 'M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z',
+  backup: 'M12 18v-8m-4 4 4-4 4 4M20 16.58A5 5 0 0 0 18 7h-1.26A8 8 0 1 0 4 15.25',
+  phone: 'M7 4.5h10a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2v-11a2 2 0 0 1 2-2zM11 17.5h2',
 };
 
 function uiIcon(name) {
@@ -195,10 +199,13 @@ const KINDS = {
   media: ['mp4', 'webm', 'mov', 'm4v', 'mp3', 'wav', 'ogg', 'm4a', 'flac'],
   note: ['txt', 'md', 'markdown', 'log', 'json', 'html', 'htm'],
 };
-const KIND_LABEL = { folder: 'Folder', doc: 'Doc', sheet: 'Sheet', image: 'Photo', pdf: 'PDF', media: 'Media', note: 'Note', file: 'File' };
+const KIND_LABEL = { folder: 'Folder', backup: 'Backup', doc: 'Doc', sheet: 'Sheet', image: 'Photo', pdf: 'PDF', media: 'Media', note: 'Note', file: 'File' };
 
 function kindOf(entry) {
-  if (entry.type === 'folder') return 'folder';
+  if (entry.type === 'folder') {
+    if (entry.name.toLowerCase() === 'backups' || (state.path && state.path.startsWith('/Backups'))) return 'backup';
+    return 'folder';
+  }
   const ext = extOf(entry.name);
   return Object.keys(KINDS).find((k) => KINDS[k].includes(ext)) || 'file';
 }
@@ -276,7 +283,13 @@ function showAuth(status = serverStatus) {
   $('#drive-view').hidden = true;
   $('#public-share-view').hidden = true;
   $('#auth-view').hidden = false;
+  $('#auth-form').hidden = false;
+  $('#pair-request-card').hidden = true;
+  $('#pair-claim-card').hidden = true;
+  if (pairPollInterval) clearInterval(pairPollInterval);
+  pairPollInterval = null;
   const setup = status && status.needsSetup;
+  $('#auth-pair-opt').hidden = !!setup;
   $('#sso').hidden = !(status && status.github) || setup;
   authMode = setup ? 'setup' : 'login';
   const form = $('#auth-form');
@@ -1235,6 +1248,18 @@ async function renderShareList() {
     copyBtn.className = 'btn small';
     copyBtn.textContent = 'Copy';
     copyBtn.addEventListener('click', () => copyText(fullUrl, 'Share link copied!'));
+    actions.append(copyBtn);
+
+    if (currentSharePath && currentSharePath.toLowerCase().endsWith('.rdoc')) {
+      const copyMdBtn = document.createElement('button');
+      copyMdBtn.type = 'button';
+      copyMdBtn.className = 'btn small';
+      copyMdBtn.textContent = 'Copy for AI (.md)';
+      copyMdBtn.title = 'Copy direct Markdown link for AI assistants';
+      copyMdBtn.addEventListener('click', () => copyText(`${location.origin}/s/${s.id}.md`, 'AI Markdown link copied!'));
+      actions.append(copyMdBtn);
+    }
+
     const revokeBtn = document.createElement('button');
     revokeBtn.type = 'button';
     revokeBtn.className = 'btn small btn-danger';
@@ -1248,7 +1273,7 @@ async function renderShareList() {
         toast(ex.message);
       }
     });
-    actions.append(copyBtn, revokeBtn);
+    actions.append(revokeBtn);
     li.append(info, actions);
     list.appendChild(li);
   }
@@ -1652,6 +1677,8 @@ async function openAccount() {
   $('#password-error').textContent = '';
   $('#account-dialog').showModal();
   renderDevices().catch((ex) => toast(ex.message));
+  $('#pair-box').hidden = true;
+  $('#ai-connect-card').hidden = true;
   $('#mcp-token-form').hidden = true;
   $('#mcp-created-box').hidden = true;
   renderAgentTokens().catch((ex) => toast(ex.message));
@@ -1711,9 +1738,18 @@ function renderPhoneSection() {
   try {
     status = JSON.parse(phone.status());
   } catch {}
-  $('#phone-sync-status').textContent = status.syncFolder ? `On for "${status.syncFolder}"` : 'Off';
-  $('#phone-upload-now').hidden = !status.syncFolder;
-  $('#phone-stop').hidden = !status.syncFolder;
+  const devName = status.deviceName || 'This phone';
+  const folder = status.syncFolder;
+  const backupPath = status.backupPath || `/Backups/${devName}`;
+  const titleEl = $('#phone-backup-title');
+  if (titleEl) titleEl.textContent = folder ? `Cloud backup: ${devName}` : 'Cloud backup';
+  $('#phone-sync-status').textContent = folder ? `On for "${folder}" → ${backupPath}` : 'Off · Tap to back up Camera or a folder to /Backups';
+  const pathEl = $('#phone-backup-path');
+  if (pathEl) pathEl.textContent = backupPath;
+  $('#phone-upload-now').hidden = !folder;
+  const openBackupsBtn = $('#phone-open-backups');
+  if (openBackupsBtn) openBackupsBtn.hidden = !folder;
+  $('#phone-stop').hidden = !folder;
   $('#phone-version').textContent = status.version ? `You have ${status.version}` : '';
 }
 
@@ -1770,6 +1806,253 @@ $('#mcp-token-form').addEventListener('submit', async (e) => {
     $('#mcp-token-error').textContent = ex.message;
   }
 });
+
+// ---------- device pairing & AI connect ----------
+
+let pairTimerInterval = null;
+let pairPollInterval = null;
+let cachedAiToken = null;
+
+$('#pair-open-btn').addEventListener('click', async () => {
+  const box = $('#pair-box');
+  const willShow = box.hidden;
+  box.hidden = !willShow;
+  $('#pair-approve-error').textContent = '';
+  if (!willShow) {
+    if (pairTimerInterval) clearInterval(pairTimerInterval);
+    return;
+  }
+  try {
+    const res = await api('POST', '/api/pair/link');
+    const fullUrl = res.url || `${location.origin}/pair#${res.token}`;
+    $('#pair-link-input').value = fullUrl;
+    $('#pair-link-copy').onclick = () => copyText(fullUrl, 'Pairing link copied!');
+
+    const qrWrap = $('#pair-qr');
+    qrWrap.replaceChildren();
+    if (typeof window.qrcode === 'function') {
+      try {
+        const qr = window.qrcode(0, 'M');
+        qr.addData(fullUrl);
+        qr.make();
+        qrWrap.innerHTML = qr.createSvgTag({ cellSize: 4, margin: 4 });
+      } catch (e) {
+        qrWrap.textContent = fullUrl;
+      }
+    }
+
+    let remaining = res.expiresIn || 300;
+    const updateTimer = () => {
+      const mins = Math.floor(remaining / 60);
+      const secs = String(remaining % 60).padStart(2, '0');
+      $('#pair-timer').textContent = `Link and QR code expire in ${mins}:${secs}`;
+      if (remaining <= 0) {
+        clearInterval(pairTimerInterval);
+        $('#pair-timer').textContent = 'This link has expired. Tap "+ Connect a device" again to generate a new one.';
+      }
+      remaining--;
+    };
+    if (pairTimerInterval) clearInterval(pairTimerInterval);
+    updateTimer();
+    pairTimerInterval = setInterval(updateTimer, 1000);
+  } catch (err) {
+    toast(err.message || 'Could not generate pairing link.');
+    box.hidden = true;
+  }
+});
+
+$('#pair-close-btn').addEventListener('click', () => {
+  $('#pair-box').hidden = true;
+  if (pairTimerInterval) clearInterval(pairTimerInterval);
+});
+
+$('#pair-approve-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const f = e.target;
+  const errEl = $('#pair-approve-error');
+  errEl.textContent = '';
+  const code = f.code.value.trim().replace(/[^a-zA-Z0-9]/g, '');
+  try {
+    const res = await api('POST', '/api/pair/approve', { code });
+    toast('Approved. That device is signing in now.');
+    f.reset();
+    $('#pair-box').hidden = true;
+    if (pairTimerInterval) clearInterval(pairTimerInterval);
+    renderDevices();
+  } catch (err) {
+    errEl.textContent = err.message || 'Invalid or expired pairing code.';
+  }
+});
+
+$('#auth-pair-btn').addEventListener('click', async () => {
+  $('#auth-form').hidden = true;
+  $('#pair-request-card').hidden = false;
+  $('#pair-request-code').textContent = '----';
+  $('#pair-request-status').innerHTML = '<span class="spinner-dot"></span> Requesting pairing code…';
+  try {
+    const res = await api('POST', '/api/pair/request');
+    $('#pair-request-code').textContent = res.code;
+    $('#pair-request-status').innerHTML = '<span class="spinner-dot"></span> Waiting for approval on your other device…';
+
+    if (pairPollInterval) clearInterval(pairPollInterval);
+    pairPollInterval = setInterval(async () => {
+      try {
+        const check = await api('GET', `/api/pair/status?id=${encodeURIComponent(res.id)}`);
+        if (check.status === 'approved') {
+          clearInterval(pairPollInterval);
+          pairPollInterval = null;
+          toast('Device approved! Signed in.');
+          location.href = '/';
+        } else if (check.status === 'expired') {
+          clearInterval(pairPollInterval);
+          pairPollInterval = null;
+          $('#pair-request-status').textContent = 'Code expired. Tap "Use password instead" to retry.';
+        }
+      } catch (err) {
+        clearInterval(pairPollInterval);
+      }
+    }, 2000);
+  } catch (err) {
+    $('#pair-request-status').textContent = err.message || 'Could not request code.';
+  }
+});
+
+$('#pair-request-cancel').addEventListener('click', () => {
+  if (pairPollInterval) clearInterval(pairPollInterval);
+  pairPollInterval = null;
+  $('#pair-request-card').hidden = true;
+  $('#auth-form').hidden = false;
+});
+
+async function bootPair() {
+  $('#drive-view').hidden = true;
+  $('#public-share-view').hidden = true;
+  $('#auth-view').hidden = false;
+  $('#auth-form').hidden = true;
+  $('#pair-request-card').hidden = true;
+  $('#pair-claim-card').hidden = false;
+
+  const hash = location.hash.replace(/^#/, '');
+  const params = new URLSearchParams(location.search);
+  const token = hash || params.get('token');
+
+  if (!token) {
+    $('#pair-claim-title').textContent = 'Invalid pairing link';
+    $('#pair-claim-msg').textContent = 'No pairing token was provided in this URL.';
+    $('#pair-claim-actions').hidden = false;
+    $('#pair-claim-retry').onclick = () => { location.href = '/'; };
+    return;
+  }
+
+  $('#pair-claim-title').textContent = 'Connecting this device…';
+  $('#pair-claim-msg').textContent = 'Please wait while your session is established.';
+  $('#pair-claim-actions').hidden = true;
+
+  try {
+    const res = await api('POST', '/api/pair/claim', { token });
+    $('#pair-claim-title').textContent = 'Connected!';
+    $('#pair-claim-msg').textContent = `Signed in as ${res.user}. Opening your drive…`;
+    toast(`Connected as ${res.user}!`);
+    setTimeout(() => {
+      location.href = '/';
+    }, 800);
+  } catch (err) {
+    $('#pair-claim-title').textContent = 'Pairing link expired or invalid';
+    $('#pair-claim-msg').textContent = err.message || 'This pairing link has expired or has already been used.';
+    $('#pair-claim-actions').hidden = false;
+    $('#pair-claim-retry').onclick = () => { location.href = '/'; };
+  }
+}
+
+// One click: pick what the AI may do, get a token, and copy a ready-made setup for your tool.
+$('#ai-quick-connect-btn').addEventListener('click', () => {
+  const card = $('#ai-connect-card');
+  card.hidden = !card.hidden;
+  if (card.hidden) return;
+  $('#ai-connect-step1').hidden = !!cachedAiToken;
+  $('#ai-tab-content-wrap').hidden = !cachedAiToken;
+});
+
+for (const btn of document.querySelectorAll('[data-ai-scope]')) {
+  btn.addEventListener('click', async () => {
+    try {
+      const { token } = await api('POST', '/api/tokens', {
+        label: btn.dataset.aiScope === 'read' ? 'AI assistant (read only)' : 'AI assistant',
+        scope: btn.dataset.aiScope,
+        rootPath: '/',
+        expiresInDays: 90,
+      });
+      cachedAiToken = token;
+      renderAgentTokens().catch(() => {});
+      fillAiConnect(token);
+      $('#ai-connect-step1').hidden = true;
+      $('#ai-tab-content-wrap').hidden = false;
+    } catch (err) {
+      toast(err.message || 'Could not make a token for the AI.');
+    }
+  });
+}
+
+function fillAiConnect(token) {
+  const mcpUrl = `${location.origin}/mcp`;
+  const claudeCmd = `claude mcp add --transport http rdrive ${mcpUrl} --header "Authorization: Bearer ${token}"`;
+  $('#ai-claude-code-cmd').textContent = claudeCmd;
+  $('#ai-copy-claude-code').onclick = () => copyText(claudeCmd, 'Claude Code command copied!');
+
+  // Claude Desktop's config file only runs local commands, so it reaches rdrive through mcp-remote.
+  const claudeDesktopConfig = JSON.stringify({
+    mcpServers: {
+      rdrive: {
+        command: 'npx',
+        args: ['-y', 'mcp-remote', mcpUrl, '--header', 'Authorization:${RDRIVE_AUTH}'],
+        env: { RDRIVE_AUTH: `Bearer ${token}` },
+      },
+    },
+  }, null, 2);
+  $('#ai-claude-desktop-cfg').textContent = claudeDesktopConfig;
+  $('#ai-copy-claude-desktop').onclick = () => copyText(claudeDesktopConfig, 'Claude Desktop config copied!');
+
+  const cursorConfig = JSON.stringify({
+    mcpServers: {
+      rdrive: {
+        url: mcpUrl,
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      },
+    },
+  }, null, 2);
+  $('#ai-cursor-cfg').textContent = cursorConfig;
+  $('#ai-copy-cursor').onclick = () => copyText(cursorConfig, 'Cursor config copied!');
+
+  const llmsUrl = `${location.origin}/llms.txt`;
+  $('#ai-llms-url').textContent = llmsUrl;
+  const brief =
+    `You can use my rdrive (my own private file drive) through its MCP server at ${mcpUrl}.\n` +
+    `Send the header "Authorization: Bearer ${token}" with every request.\n` +
+    `Read ${llmsUrl} first: it lists every tool. Documents (.rdoc) are read and written as Markdown ` +
+    `with doc_read, doc_write and doc_append; spreadsheets with sheet_read and sheet_update_cells.`;
+  $('#ai-copy-llms').onclick = () => copyText(brief, 'Instructions for the AI copied!');
+}
+
+$('#ai-connect-close').addEventListener('click', () => {
+  $('#ai-connect-card').hidden = true;
+});
+
+const aiTabs = [
+  { btn: 'ai-tab-claude-code', pane: 'ai-pane-claude-code' },
+  { btn: 'ai-tab-claude-desktop', pane: 'ai-pane-claude-desktop' },
+  { btn: 'ai-tab-cursor', pane: 'ai-pane-cursor' },
+  { btn: 'ai-tab-llms', pane: 'ai-pane-llms' },
+];
+for (const t of aiTabs) {
+  $(`#${t.btn}`).addEventListener('click', () => {
+    for (const other of aiTabs) {
+      $(`#${other.btn}`).classList.toggle('active', other.btn === t.btn);
+      $(`#${other.pane}`).hidden = other.pane !== t.pane;
+    }
+  });
+}
 
 // ---------- linked servers (sync) ----------
 
@@ -2066,6 +2349,9 @@ window.addEventListener('hashchange', () => {
 });
 
 (async function boot() {
+  if (location.pathname === '/pair' || location.pathname.startsWith('/pair/')) {
+    return bootPair();
+  }
   const shareMatch = /^\/s\/([A-Za-z0-9_-]+)$/.exec(location.pathname);
   if (shareMatch) {
     return bootPublicShare(shareMatch[1]);

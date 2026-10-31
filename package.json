@@ -48,6 +48,7 @@
     "exceljs": "^4.4.0",
     "jszip": "^3.10.2",
     "linkedom": "^0.18.14",
-    "mammoth": "^1.13.0"
+    "mammoth": "^1.13.0",
+    "qrcode-generator": "^2.0.4"
   }
 }

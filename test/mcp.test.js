@@ -273,3 +273,37 @@ test('Stdio MCP entrypoint (mcp.js) works end-to-end and token revocation takes 
   const afterRevoke = await mcpRpc(aliceScopedToken, 'ping');
   assert.equal(afterRevoke.status, 401);
 });
+
+test('MCP RDocs tools: doc_write, doc_read, doc_append, and resource reading', async () => {
+  const w = await mcpTool(aliceWriteToken, 'doc_write', {
+    path: '/Notes',
+    markdown: '# Meeting Notes\n\n- Discussed roadmap\n- Next steps',
+  });
+  assert.equal(w.isError, false);
+  assert.equal(w.data.name, 'Notes.rdoc');
+
+  const r = await mcpTool(aliceReadOnlyToken, 'doc_read', { path: '/Notes' });
+  assert.equal(r.isError, false);
+  assert.ok(r.data.markdown.includes('# Meeting Notes'));
+  assert.ok(r.data.markdown.includes('- Discussed roadmap'));
+
+  const rf = await mcpTool(aliceReadOnlyToken, 'drive_read_file', { path: '/Notes.rdoc' });
+  assert.equal(rf.isError, false);
+  assert.equal(rf.data.type, 'document');
+  assert.ok(rf.data.content.includes('# Meeting Notes'));
+
+  const app = await mcpTool(aliceWriteToken, 'doc_append', {
+    path: '/Notes.rdoc',
+    markdown: '\n## Decisions\n\nApproved budget.',
+  });
+  assert.equal(app.isError, false);
+
+  const r2 = await mcpTool(aliceReadOnlyToken, 'doc_read', { path: '/Notes.rdoc' });
+  assert.ok(r2.data.markdown.includes('## Decisions'));
+  assert.ok(r2.data.markdown.includes('Approved budget.'));
+
+  const res = await mcpRpc(aliceReadOnlyToken, 'resources/read', { uri: 'rdrive:///Notes.rdoc' });
+  assert.equal(res.status, 200);
+  assert.equal(res.json.result.contents[0].mimeType, 'text/markdown');
+  assert.ok(res.json.result.contents[0].text.includes('# Meeting Notes'));
+});
