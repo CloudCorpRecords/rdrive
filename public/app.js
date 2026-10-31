@@ -135,6 +135,125 @@ const PREVIEW = {
   text: ['txt', 'md', 'log', 'json'],
   pdf: ['pdf'],
 };
+// ---------- Night garden: line icons, file tiles, details line ----------
+
+// Outline icons (24px grid, drawn with the current text color).
+const UI_ICONS = {
+  plus: 'M12 5v14M5 12h14',
+  folder: 'M4 7.5A2.5 2.5 0 0 1 6.5 5H9l2 2h6.5A2.5 2.5 0 0 1 20 9.5v7a2.5 2.5 0 0 1-2.5 2.5h-11A2.5 2.5 0 0 1 4 16.5z',
+  search: 'M11 4.5a6.5 6.5 0 1 0 0 13 6.5 6.5 0 0 0 0-13zM20 20l-4.2-4.2',
+  trash: 'M4.5 7h15M10 11v6M14 11v6M6 7l.8 11.2A2 2 0 0 0 8.8 20h6.4a2 2 0 0 0 2-1.8L18 7M9.5 7V4.5h5V7',
+  user: 'M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM5 20a7 7 0 0 1 14 0',
+  doc: 'M14 3.5H7.5a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h9a2 2 0 0 0 2-2V8zM14 3.5V8h4.5M9 13h6M9 16.5h6',
+  sheet: 'M4.5 6.5a2 2 0 0 1 2-2h11a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2h-11a2 2 0 0 1-2-2zM4.5 10h15M4.5 14.5h15M10 4.5v15',
+  image: 'M4.5 6.5a2 2 0 0 1 2-2h11a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2h-11a2 2 0 0 1-2-2zM9 11a1.75 1.75 0 1 0 0-3.5A1.75 1.75 0 0 0 9 11zM19.5 15l-4.5-4.5-8.5 9',
+  note: 'M6 4.5h12a1.5 1.5 0 0 1 1.5 1.5v12a1.5 1.5 0 0 1-1.5 1.5H6A1.5 1.5 0 0 1 4.5 18V6A1.5 1.5 0 0 1 6 4.5zM8.5 9h7M8.5 12.5h7M8.5 16h4',
+  pdf: 'M14 3.5H7.5a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h9a2 2 0 0 0 2-2V8zM14 3.5V8h4.5M8.5 16.5c2-1.5 3.5-4 4-7 .5 3 2 4.8 3.5 5.5',
+  media: 'M12 3.5a8.5 8.5 0 1 0 0 17 8.5 8.5 0 0 0 0-17zM10 8.5l5 3.5-5 3.5z',
+  file: 'M14 3.5H7.5a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h9a2 2 0 0 0 2-2V8zM14 3.5V8h4.5',
+  upload: 'M12 15.5V4.5M7.5 9 12 4.5 16.5 9M5 19.5h14',
+  camera: 'M4.5 8.5a2 2 0 0 1 2-2h2l1.5-2h4l1.5 2h2a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-11a2 2 0 0 1-2-2zM12 10a3 3 0 1 0 0 6 3 3 0 0 0 0-6z',
+  zip: 'M6.5 4.5h11a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2h-11a2 2 0 0 1-2-2v-11a2 2 0 0 1 2-2zM12 4.5v2M12 8.5v2M11 12.5h2v3h-2z',
+  open: 'M13.5 4.5h6v6M19.5 4.5l-8 8M17.5 13.5v4a2 2 0 0 1-2 2h-9a2 2 0 0 1-2-2v-9a2 2 0 0 1 2-2h4',
+  share: 'M7 10a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5zM17 4a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5zM17 16a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5zM9.2 11.3l5.6-3.1M9.2 13.7l5.6 3.1',
+  download: 'M12 4.5v11M7.5 11l4.5 4.5 4.5-4.5M5 19.5h14',
+  copy: 'M9 9h10v10H9zM5 15V5h10',
+  edit: 'M4.5 19.5h4l10-10-4-4-10 10zM13 7l4 4',
+  move: 'M4 7.5A2.5 2.5 0 0 1 6.5 5H9l2 2h6.5A2.5 2.5 0 0 1 20 9.5v7a2.5 2.5 0 0 1-2.5 2.5h-11A2.5 2.5 0 0 1 4 16.5zM9.5 13h6M13 10.5l2.5 2.5-2.5 2.5',
+  more: 'M6 12h.01M12 12h.01M18 12h.01',
+};
+
+function uiIcon(name) {
+  const ns = 'http://www.w3.org/2000/svg';
+  const svg = document.createElementNS(ns, 'svg');
+  svg.setAttribute('viewBox', '0 0 24 24');
+  svg.setAttribute('class', 'icon');
+  svg.setAttribute('aria-hidden', 'true');
+  const p = document.createElementNS(ns, 'path');
+  p.setAttribute('d', UI_ICONS[name] || UI_ICONS.file);
+  p.setAttribute('fill', 'none');
+  p.setAttribute('stroke', 'currentColor');
+  p.setAttribute('stroke-width', name === 'more' ? '3' : '1.8');
+  p.setAttribute('stroke-linecap', 'round');
+  p.setAttribute('stroke-linejoin', 'round');
+  svg.appendChild(p);
+  return svg;
+}
+
+// Fill every <span data-icon="…"> placeholder in the page with its icon.
+function hydrateIcons(root = document) {
+  for (const el of root.querySelectorAll('[data-icon]')) {
+    if (!el.firstElementChild) el.appendChild(uiIcon(el.dataset.icon));
+  }
+}
+
+const KINDS = {
+  doc: ['rdoc', 'docx', 'odt', 'doc', 'rtf'],
+  sheet: ['rsheet', 'csv', 'tsv', 'xlsx', 'ods', 'xls'],
+  image: ['png', 'jpg', 'jpeg', 'gif', 'webp', 'avif', 'bmp', 'heic', 'svg'],
+  pdf: ['pdf'],
+  media: ['mp4', 'webm', 'mov', 'm4v', 'mp3', 'wav', 'ogg', 'm4a', 'flac'],
+  note: ['txt', 'md', 'markdown', 'log', 'json', 'html', 'htm'],
+};
+const KIND_LABEL = { folder: 'Folder', doc: 'Doc', sheet: 'Sheet', image: 'Photo', pdf: 'PDF', media: 'Media', note: 'Note', file: 'File' };
+
+function kindOf(entry) {
+  if (entry.type === 'folder') return 'folder';
+  const ext = extOf(entry.name);
+  return Object.keys(KINDS).find((k) => KINDS[k].includes(ext)) || 'file';
+}
+
+// The colored square (or photo thumbnail) in front of a file name.
+function fileTile(entry, clientPath) {
+  const kind = kindOf(entry);
+  const tile = document.createElement('span');
+  tile.className = `tile tile-${kind}`;
+  // Thumbnails only for formats the server will show inline (never SVG, which could carry scripts).
+  if (kind === 'image' && clientPath && !['svg', 'heic'].includes(extOf(entry.name))) {
+    const img = document.createElement('img');
+    img.alt = '';
+    img.loading = 'lazy';
+    img.decoding = 'async';
+    img.src = downloadUrl(clientPath, true);
+    img.addEventListener('error', () => img.replaceWith(uiIcon('image')), { once: true });
+    tile.appendChild(img);
+  } else {
+    tile.appendChild(uiIcon(kind));
+  }
+  return tile;
+}
+
+function relativeDay(iso) {
+  const d = new Date(iso);
+  const today = new Date();
+  const days = Math.round((new Date(today.toDateString()) - new Date(d.toDateString())) / 86400000);
+  if (days === 0) return `today ${d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}`;
+  if (days === 1) return 'yesterday';
+  if (days < 7) return d.toLocaleDateString(undefined, { weekday: 'long' });
+  return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: d.getFullYear() === today.getFullYear() ? undefined : 'numeric' });
+}
+
+// "Photo · 51 KB · today 4:40 PM" (shown under the name on phones).
+function metaLine(entry, when) {
+  const parts = [KIND_LABEL[kindOf(entry)]];
+  if (entry.type !== 'folder' && entry.size != null) parts.push(formatSize(entry.size));
+  if (when) parts.push(relativeDay(when));
+  return parts.join(' · ');
+}
+
+// Name plus details line, used by every list.
+function nameBlock(nameEl, meta) {
+  const wrap = document.createElement('span');
+  wrap.className = 'name-wrap';
+  const m = document.createElement('span');
+  m.className = 'meta';
+  m.textContent = meta;
+  wrap.append(nameEl, m);
+  return wrap;
+}
+
+const isPhoneLayout = () => window.matchMedia('(max-width: 700px)').matches;
+
 function previewKind(name) {
   const ext = name.split('.').pop().toLowerCase();
   return Object.keys(PREVIEW).find((k) => PREVIEW[k].includes(ext)) || null;
@@ -233,13 +352,18 @@ function showDrive() {
   $('#auth-view').hidden = true;
   $('#public-share-view').hidden = true;
   $('#drive-view').hidden = false;
-  $('#whoami').textContent = state.user;
+  // Full name on wide screens, a one-letter avatar on phones.
+  const full = Object.assign(document.createElement('span'), { className: 'full', textContent: state.user });
+  const initial = Object.assign(document.createElement('span'), { className: 'initial', textContent: state.user.slice(0, 1) });
+  $('#whoami').replaceChildren(full, initial);
+  $('#whoami').setAttribute('aria-label', `Account: ${state.user}`);
   load();
   refreshUsage();
 }
 
 async function load() {
   state.selected.clear();
+  setNav(state.view === 'trash' ? 'trash' : state.view === 'search' ? 'search' : 'files');
   $('#drive-actions').hidden = state.view === 'trash';
   $('#trash-actions').hidden = state.view !== 'trash';
   $('#trash-btn').classList.toggle('btn-primary', state.view === 'trash');
@@ -350,6 +474,9 @@ function renderCrumbs(container, p, onClick, dropTargets) {
     const b = document.createElement('button');
     b.type = 'button';
     b.textContent = i ? parts[i - 1] : 'My Drive';
+    // On phones only the parent (as a back link) and the current folder (as the title) show.
+    if (i === paths.length - 1) b.classList.add('is-current');
+    if (i === paths.length - 2) b.classList.add('is-parent');
     b.addEventListener('click', () => onClick(cp));
     if (dropTargets && cp !== p) makeDropTarget(b, cp);
     container.appendChild(b);
@@ -383,14 +510,17 @@ function render() {
 
     const name = document.createElement('span');
     name.className = 'cell-name';
-    const iconType = iconFor(entry);
-    name.appendChild(svgIcon(iconType));
+    name.appendChild(fileTile(entry, p));
     const link = document.createElement('a');
     link.className = 'name';
     link.textContent = entry.name;
     link.title = entry.name;
-    link.addEventListener('click', () => openEntry(entry));
-    name.appendChild(link);
+    link.addEventListener('click', (e) => {
+      if (document.body.classList.contains('selecting')) return; // the row handles taps while selecting
+      e.stopPropagation();
+      openEntry(entry);
+    });
+    name.appendChild(nameBlock(link, metaLine(entry, entry.modified)));
 
     const size = document.createElement('span');
     size.className = 'cell-size';
@@ -413,13 +543,15 @@ function render() {
     menuCell.appendChild(menuBtn);
 
     row.append(check, name, size, date, menuCell);
+    menuBtn.replaceChildren(uiIcon('more'));
+    attachTouch(row, entry, () => openEntry(entry));
     row.addEventListener('dblclick', () => openEntry(entry));
     row.addEventListener('keydown', (e) => {
       if (e.key === 'Enter') openEntry(entry);
     });
     row.addEventListener('contextmenu', (e) => {
       e.preventDefault();
-      openMenu(entry, null, e.clientX, e.clientY);
+      if (!isPhoneLayout()) openMenu(entry, null, e.clientX, e.clientY);
     });
     row.addEventListener('dragstart', (e) => {
       const names = state.selected.has(entry.name) ? [...state.selected] : [entry.name];
@@ -437,6 +569,7 @@ function renderSearch() {
   crumbs.replaceChildren();
   const b = document.createElement('button');
   b.type = 'button';
+  b.className = 'is-current';
   b.textContent = `Search results for "${state.searchQuery}" (${state.entries.length})`;
   crumbs.appendChild(b);
 
@@ -457,17 +590,19 @@ function renderSearch() {
 
     const name = document.createElement('span');
     name.className = 'cell-name';
-    const iconType = iconFor(entry);
-    name.appendChild(svgIcon(iconType));
+    name.appendChild(fileTile(entry, entry.path || joinPath(entry.dir, entry.name)));
     const link = document.createElement('a');
     link.className = 'name';
     link.textContent = entry.name;
     link.title = entry.path;
-    link.addEventListener('click', () => openEntry(entry, entry.dir));
+    link.addEventListener('click', (e) => {
+      e.stopPropagation();
+      openEntry(entry, entry.dir);
+    });
     const loc = document.createElement('span');
     loc.className = 'muted small';
     loc.textContent = entry.dir === '/' ? '' : `in ${entry.dir}`;
-    name.append(link, loc);
+    name.append(nameBlock(link, `${metaLine(entry)} · ${entry.dir === '/' ? 'My Drive' : `in ${entry.dir}`}`), loc);
 
     const size = document.createElement('span');
     size.className = 'cell-size';
@@ -481,7 +616,8 @@ function renderSearch() {
     menuCell.className = 'cell-menu';
     const menuBtn = document.createElement('button');
     menuBtn.type = 'button';
-    menuBtn.textContent = '⋯';
+    menuBtn.setAttribute('aria-label', `Actions for ${entry.name}`);
+    menuBtn.appendChild(uiIcon('more'));
     menuBtn.addEventListener('click', (e) => {
       e.stopPropagation();
       openMenu({ ...entry, dir: entry.dir }, menuBtn);
@@ -489,6 +625,9 @@ function renderSearch() {
     menuCell.appendChild(menuBtn);
 
     row.append(check, name, size, date, menuCell);
+    row.addEventListener('click', () => {
+      if (isPhoneLayout()) openEntry(entry, entry.dir);
+    });
     row.addEventListener('dblclick', () => openEntry(entry, entry.dir));
     rows.appendChild(row);
   }
@@ -499,6 +638,7 @@ function renderTrash() {
   crumbs.replaceChildren();
   const b = document.createElement('button');
   b.type = 'button';
+  b.className = 'is-current';
   b.textContent = 'Trash';
   crumbs.appendChild(b);
 
@@ -518,15 +658,14 @@ function renderTrash() {
 
     const name = document.createElement('span');
     name.className = 'cell-name';
-    const iconType = iconFor(item);
-    name.appendChild(svgIcon(iconType));
+    name.appendChild(fileTile(item, null)); // no thumbnails: trashed files aren't downloadable by path
     const label = document.createElement('span');
     label.className = 'name';
     label.textContent = item.name;
     const orig = document.createElement('span');
     orig.className = 'muted small';
     orig.textContent = `from ${item.originalDir || '/'}`;
-    name.append(label, orig);
+    name.append(nameBlock(label, `Deleted ${relativeDay(item.deletedAt)} · from ${item.originalDir || '/'}`), orig);
 
     const size = document.createElement('span');
     size.className = 'cell-size';
@@ -577,6 +716,41 @@ function renderTrash() {
 
 // ---------- selection ----------
 
+// Phones: tap opens, long-press starts selecting; while selecting, taps toggle.
+function attachTouch(row, entry, open) {
+  let timer = null;
+  let longPressed = false;
+  let start = null;
+  row.addEventListener('touchstart', (e) => {
+    longPressed = false;
+    start = e.touches[0];
+    timer = setTimeout(() => {
+      longPressed = true;
+      if (navigator.vibrate) navigator.vibrate(12);
+      toggleSelect(entry.name, !state.selected.has(entry.name));
+    }, 450);
+  }, { passive: true });
+  const cancel = () => clearTimeout(timer);
+  row.addEventListener('touchmove', (e) => {
+    const t = e.touches[0];
+    if (start && (Math.abs(t.clientX - start.clientX) > 10 || Math.abs(t.clientY - start.clientY) > 10)) cancel();
+  }, { passive: true });
+  row.addEventListener('touchend', cancel);
+  row.addEventListener('touchcancel', cancel);
+  row.addEventListener('contextmenu', (e) => {
+    if (isPhoneLayout()) e.preventDefault(); // long-press is ours on phones
+  });
+  row.addEventListener('click', (e) => {
+    if (!isPhoneLayout() || e.target.closest('.cell-menu, .cell-check')) return;
+    if (longPressed) {
+      longPressed = false;
+      return;
+    }
+    if (document.body.classList.contains('selecting')) toggleSelect(entry.name, !state.selected.has(entry.name));
+    else open();
+  });
+}
+
 function toggleSelect(name, on) {
   if (on) state.selected.add(name);
   else state.selected.delete(name);
@@ -591,6 +765,7 @@ function syncSelectionUi() {
     if (cb) cb.checked = on;
   }
   const n = state.selected.size;
+  document.body.classList.toggle('selecting', n > 0);
   $('#selection-actions').hidden = n === 0;
   $('#selection-count').textContent = `${n} selected`;
   const all = $('#select-all');
@@ -605,6 +780,10 @@ $('#select-all').addEventListener('change', (e) => {
 
 $('#delete-selected').addEventListener('click', () => deletePaths([...state.selected].map((n) => joinPath(state.path, n))));
 $('#move-selected').addEventListener('click', () => moveDialog([...state.selected].map((n) => joinPath(state.path, n))));
+$('#clear-selected').addEventListener('click', () => {
+  state.selected.clear();
+  syncSelectionUi();
+});
 
 document.addEventListener('keydown', (e) => {
   if ($('#drive-view').hidden || document.querySelector('dialog[open]') || e.target.matches('input, select, textarea')) return;
@@ -1102,11 +1281,17 @@ $('#share-close').addEventListener('click', () => $('#share-dialog').close());
 function openMenu(entry, anchor, x, y) {
   const menu = $('#menu');
   state.menuTarget = entry;
-  $('#menu-download').textContent = entry.type === 'folder' ? 'Download .zip' : 'Download';
+  $('#menu-download').querySelector('.label').textContent = entry.type === 'folder' ? 'Download .zip' : 'Download';
   const ext = extOf(entry.name);
   const convert = $('#menu-convert');
   convert.hidden = entry.type === 'folder' || !(TO_RDOC.includes(ext) || TO_RSHEET.includes(ext));
-  convert.textContent = TO_RSHEET.includes(ext) ? 'Edit a copy in RDrive Sheets' : 'Edit a copy in RDocs';
+  convert.querySelector('.label').textContent = TO_RSHEET.includes(ext) ? 'Edit a copy in RDrive Sheets' : 'Edit a copy in RDocs';
+  // Phones show the menu as a bottom sheet titled with the file it acts on.
+  const title = $('#menu-title');
+  const titleText = document.createElement('span');
+  titleText.textContent = entry.name;
+  title.replaceChildren(fileTile(entry, entry.type === 'file' ? entry.path || joinPath(entry.dir || state.path, entry.name) : null), titleText);
+  $('#sheet-backdrop').hidden = !isPhoneLayout();
   menu.hidden = false;
   const r = anchor ? anchor.getBoundingClientRect() : { left: x, right: x, bottom: y, top: y };
   const w = menu.offsetWidth;
@@ -1118,11 +1303,76 @@ function openMenu(entry, anchor, x, y) {
 
 function closeMenu() {
   $('#menu').hidden = true;
+  $('#new-menu').hidden = true;
+  $('#sheet-backdrop').hidden = true;
 }
 
 document.addEventListener('click', (e) => {
-  if (!e.target.closest('#menu')) closeMenu();
+  if (!e.target.closest('#menu, #new-menu, #fab')) closeMenu();
 });
+
+// ---------- phones: + button, "New" sheet, bottom bar ----------
+
+$('#fab').appendChild(uiIcon('plus'));
+$('#fab').addEventListener('click', (e) => {
+  e.stopPropagation();
+  const open = $('#new-menu').hidden;
+  closeMenu();
+  if (!open) return;
+  $('#new-menu').hidden = false;
+  $('#sheet-backdrop').hidden = false;
+});
+
+$('#new-menu').addEventListener('click', (e) => {
+  const item = e.target.closest('[data-new]');
+  if (!item) return;
+  closeMenu();
+  const what = item.dataset.new;
+  if (what === 'doc') createNewDocument();
+  if (what === 'sheet') createNewSpreadsheet();
+  if (what === 'folder') $('#new-folder').click();
+  if (what === 'upload') $('#file-input').click();
+  if (what === 'camera') $('#camera-input').click();
+  if (what === 'zip') download(state.path, true);
+});
+
+$('#camera-input').addEventListener('change', (e) => {
+  queueUploads([...e.target.files].map((file) => ({ file, dir: state.path })));
+  e.target.value = '';
+});
+
+function setNav(which) {
+  for (const b of document.querySelectorAll('#bottom-nav [data-nav]')) b.classList.toggle('active', b.dataset.nav === which);
+  $('#fab').hidden = which === 'trash';
+}
+
+$('#bottom-nav').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-nav]');
+  if (!b) return;
+  const nav = b.dataset.nav;
+  if (nav === 'files') {
+    $('#search-input').value = '';
+    state.searchQuery = '';
+    state.view = 'drive';
+    setNav('files');
+    if (location.hash === '#/' || !location.hash) load();
+    else navigate('/');
+  } else if (nav === 'search') {
+    setNav('search');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+    $('#search-input').focus();
+  } else if (nav === 'trash') {
+    $('#search-input').value = '';
+    state.searchQuery = '';
+    state.view = 'trash';
+    setNav('trash');
+    load();
+  } else if (nav === 'you') {
+    openAccount();
+  }
+});
+
+hydrateIcons();
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') closeMenu();
 });
@@ -1380,6 +1630,10 @@ async function openAccount() {
     return toast(ex.message);
   }
   $('#account-name').textContent = acct.user;
+  $('#you-avatar').textContent = acct.user.slice(0, 1);
+  $('#you-name').textContent = acct.user;
+  $('#you-usage').textContent = $('#usage').textContent;
+  renderPhoneSection();
   const davUrl = `${location.origin}/dav/`;
   $('#webdav-url').textContent = davUrl;
   $('#copy-webdav').onclick = () => copyText(davUrl, 'WebDAV address copied!');
@@ -1442,6 +1696,34 @@ async function renderAgentTokens() {
     list.appendChild(li);
   }
 }
+
+$('#you-signout').addEventListener('click', () => {
+  $('#account-dialog').close();
+  $('#logout').click();
+});
+
+// Inside the Android app, window.RDriveApp offers the phone's own settings (auto-upload, updates…).
+function renderPhoneSection() {
+  const phone = window.RDriveApp;
+  $('#phone-section').hidden = !phone;
+  if (!phone) return;
+  let status = {};
+  try {
+    status = JSON.parse(phone.status());
+  } catch {}
+  $('#phone-sync-status').textContent = status.syncFolder ? `On for "${status.syncFolder}"` : 'Off';
+  $('#phone-upload-now').hidden = !status.syncFolder;
+  $('#phone-stop').hidden = !status.syncFolder;
+  $('#phone-version').textContent = status.version ? `You have ${status.version}` : '';
+}
+
+$('#phone-section').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-phone]');
+  if (!b || !window.RDriveApp || typeof window.RDriveApp[b.dataset.phone] !== 'function') return;
+  window.RDriveApp[b.dataset.phone]();
+  if (b.dataset.phone !== 'checkForUpdates') $('#account-dialog').close();
+  setTimeout(renderPhoneSection, 800);
+});
 
 $('#mcp-new-btn').addEventListener('click', () => {
   const f = $('#mcp-token-form');

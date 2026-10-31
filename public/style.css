@@ -1,43 +1,53 @@
+/* Night garden: deep green-black and soft mint at night, a sage "day garden" when the device is light.
+   Each file type gets a tint (--t-*) and a matching background (--t-*-bg) for its tile. */
 :root {
-  --bg: #f6f7f9;
+  --bg: #f1f5f2;
   --surface: #ffffff;
-  --surface-2: #f0f2f5;
-  --border: #e2e5ea;
-  --text: #1b1f24;
-  --muted: #646b75;
-  --accent: #2f6fde;
+  --surface-2: #e8efea;
+  --surface-3: #dde7e1;
+  --border: #d7e2db;
+  --text: #14201a;
+  --muted: #5b6f65;
+  --accent: #1e8a5b;
   --accent-text: #ffffff;
-  --accent-soft: #e7effc;
-  --danger: #c93a3a;
-  --danger-soft: #fbeaea;
-  --folder: #e0a526;
-  --shadow: 0 8px 28px rgba(15, 23, 42, 0.12);
-  --radius: 10px;
+  --accent-soft: #d9f0e3;
+  --danger: #c4473c;
+  --danger-soft: #fbe7e4;
+  --folder: #a57815;
+  --shadow: 0 10px 30px rgba(20, 40, 30, 0.12);
+  --radius: 16px;
+  --t-folder: #a57815; --t-folder-bg: #f8ebcb;
+  --t-doc: #2f66c9; --t-doc-bg: #e2ecfc;
+  --t-sheet: #4e7a13; --t-sheet-bg: #e8f2d6;
+  --t-image: #b5582a; --t-image-bg: #fbe6da;
+  --t-note: #6a4fc4; --t-note-bg: #ede7fb;
+  --t-pdf: #c4473c; --t-pdf-bg: #fbe4e1;
+  --t-media: #2a7f8f; --t-media-bg: #dcf1f4;
+  --t-file: #5b6f65; --t-file-bg: #e6eee9;
   color-scheme: light;
 }
 
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
-    --bg: #121418;
-    --surface: #1a1d22;
-    --surface-2: #23272e;
-    --border: #2e333b;
-    --text: #e7e9ec;
-    --muted: #99a1ac;
-    --accent: #5b8ff0;
-    --accent-text: #0d1117;
-    --accent-soft: #1f2a3d;
-    --danger: #ef6b6b;
-    --danger-soft: #3a2224;
-    --folder: #e8b54a;
-    --shadow: 0 8px 28px rgba(0, 0, 0, 0.5);
+    --bg: #0f1613; --surface: #17211d; --surface-2: #1e2a25; --surface-3: #26342e; --border: #283731;
+    --text: #e7f1eb; --muted: #8ca399; --accent: #7fd6a8; --accent-text: #08231a; --accent-soft: #1d3a2d;
+    --danger: #f2918a; --danger-soft: #3b2422; --folder: #e9c46a; --shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+    --t-folder: #e9c46a; --t-folder-bg: #352e1c; --t-doc: #8fb8f7; --t-doc-bg: #1d2a3f;
+    --t-sheet: #c3e07a; --t-sheet-bg: #283222; --t-image: #f2b38d; --t-image-bg: #3a2b23;
+    --t-note: #bba9f2; --t-note-bg: #2b283c; --t-pdf: #f2918a; --t-pdf-bg: #3b2422;
+    --t-media: #7fd0de; --t-media-bg: #1d3338; --t-file: #a9bdb4; --t-file-bg: #24302b;
     color-scheme: dark;
   }
 }
 :root[data-theme="dark"] {
-  --bg: #121418; --surface: #1a1d22; --surface-2: #23272e; --border: #2e333b; --text: #e7e9ec;
-  --muted: #99a1ac; --accent: #5b8ff0; --accent-text: #0d1117; --accent-soft: #1f2a3d; --danger: #ef6b6b;
-  --danger-soft: #3a2224; --folder: #e8b54a; --shadow: 0 8px 28px rgba(0, 0, 0, 0.5); color-scheme: dark;
+  --bg: #0f1613; --surface: #17211d; --surface-2: #1e2a25; --surface-3: #26342e; --border: #283731;
+  --text: #e7f1eb; --muted: #8ca399; --accent: #7fd6a8; --accent-text: #08231a; --accent-soft: #1d3a2d;
+  --danger: #f2918a; --danger-soft: #3b2422; --folder: #e9c46a; --shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+  --t-folder: #e9c46a; --t-folder-bg: #352e1c; --t-doc: #8fb8f7; --t-doc-bg: #1d2a3f;
+  --t-sheet: #c3e07a; --t-sheet-bg: #283222; --t-image: #f2b38d; --t-image-bg: #3a2b23;
+  --t-note: #bba9f2; --t-note-bg: #2b283c; --t-pdf: #f2918a; --t-pdf-bg: #3b2422;
+  --t-media: #7fd0de; --t-media-bg: #1d3338; --t-file: #a9bdb4; --t-file-bg: #24302b;
+  color-scheme: dark;
 }
 
 * { box-sizing: border-box; }
@@ -136,7 +146,7 @@ input:not([type="checkbox"]) {
 .cell-menu button:hover { background: var(--border); color: var(--text); }
 .icon { width: 20px; height: 20px; flex: none; }
 .icon-folder { color: var(--folder); }
-.icon-sheet { color: #2e8b57; }
+.icon-sheet { color: var(--t-sheet); }
 .icon-file { color: var(--muted); }
 input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--accent); cursor: pointer; }
 
@@ -509,17 +519,155 @@ dialog.sheet-modal[open] {
   font-weight: 600;
 }
 
-/* Phones */
-@media (max-width: 640px) {
-  .topbar { padding: 10px 12px; flex-wrap: wrap; }
-  .search-box { order: 3; max-width: 100%; flex-basis: 100%; margin: 6px 0 0; }
-  #usage { display: none; }
-  .toolbar { padding: 12px 16px 8px; }
-  .listing { width: calc(100% - 32px); }
-  .row { grid-template-columns: 32px minmax(0, 1fr) 72px 40px; }
-  .row:has(.trash-row-actions) { grid-template-columns: 24px minmax(0, 1fr) 110px; }
-  .row:has(.trash-row-actions) .cell-size { display: none; }
-  .cell-date { display: none; }
-  .selection-actions { border-right: 0; padding-right: 0; }
-  dialog.sheet-modal { width: 100vw; height: 100vh; border-radius: 0; }
+/* ============================== Night garden ============================== */
+/* Shapes and type shared by every screen: pill buttons, rounded cards, softer weights. */
+body { font-size: 14.5px; -webkit-tap-highlight-color: transparent; }
+.btn { height: 36px; padding: 0 16px; border-radius: 999px; font-weight: 500; transition: background 0.15s, filter 0.15s; }
+.btn.small { height: 30px; padding: 0 12px; }
+.btn-primary { font-weight: 600; }
+input:not([type="checkbox"]), .select-input { border-radius: 12px; background: var(--surface-2); border-color: transparent; }
+input:not([type="checkbox"]):focus-visible { outline: 2px solid var(--accent); outline-offset: 0; }
+.topbar { background: color-mix(in srgb, var(--bg) 86%, transparent); backdrop-filter: blur(12px); border-bottom-color: transparent; }
+.brand { font-weight: 650; letter-spacing: -0.02em; }
+.search-box input { height: 38px; background: var(--surface-2); }
+.chip { background: var(--accent-soft); color: var(--accent); }
+.listing { border: 0; border-radius: 20px; background: var(--surface); }
+.row { min-height: 56px; border-top-color: color-mix(in srgb, var(--border) 60%, transparent); }
+.row-head { background: transparent; min-height: 40px; }
+#rows .row:hover { background: var(--surface-2); }
+.crumbs { font-size: 18px; }
+.crumbs button:last-child { font-weight: 650; }
+.menu, dialog, .auth-card, .uploads { border-radius: 20px; border-color: var(--border); }
+.menu { padding: 6px; }
+.menu button { border-radius: 12px; padding: 10px 12px; }
+.toast { border-radius: 999px; padding: 10px 18px; }
+.empty { padding: 64px 16px; }
+.empty-art { width: 72px; height: 72px; margin: 0 auto 14px; border-radius: 24px; display: grid; place-items: center; background: var(--accent-soft); color: var(--accent); }
+.empty-art .icon { width: 34px; height: 34px; }
+.cell-menu button { border-radius: 999px; width: 36px; height: 36px; }
+
+/* File tiles: a soft square in the file type's color, or a photo thumbnail. */
+.tile { width: 36px; height: 36px; flex: none; border-radius: 11px; display: grid; place-items: center; background: var(--t-file-bg); color: var(--t-file); overflow: hidden; }
+.tile .icon { width: 20px; height: 20px; color: inherit; }
+.tile img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.tile-folder { background: var(--t-folder-bg); color: var(--t-folder); }
+.tile-doc { background: var(--t-doc-bg); color: var(--t-doc); }
+.tile-sheet { background: var(--t-sheet-bg); color: var(--t-sheet); }
+.tile-image { background: var(--t-image-bg); color: var(--t-image); }
+.tile-note { background: var(--t-note-bg); color: var(--t-note); }
+.tile-pdf { background: var(--t-pdf-bg); color: var(--t-pdf); }
+.tile-media { background: var(--t-media-bg); color: var(--t-media); }
+.name-wrap { display: flex; flex-direction: column; min-width: 0; }
+.name-wrap .meta { display: none; font-size: 12.5px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* The "Add" sheet: each choice in its file type's color. */
+#new-menu [data-new="doc"] .icon { color: var(--t-doc); }
+#new-menu [data-new="sheet"] .icon { color: var(--t-sheet); }
+#new-menu [data-new="folder"] .icon { color: var(--t-folder); }
+#new-menu [data-new="upload"] .icon, #new-menu [data-new="camera"] .icon { color: var(--accent); }
+#new-menu [data-new="zip"] .icon { color: var(--t-note); }
+
+/* Menus: icon + label. */
+.menu button { display: flex; align-items: center; gap: 10px; }
+.menu button .icon { width: 18px; height: 18px; color: var(--muted); flex: none; }
+.menu .danger .icon { color: var(--danger); }
+
+/* "You" (account) header and the Android app's phone actions. */
+.you-row { display: flex; align-items: center; gap: 14px; }
+.you-avatar { width: 48px; height: 48px; flex: none; border-radius: 999px; display: grid; place-items: center; background: var(--accent-soft); color: var(--accent); font-size: 20px; font-weight: 650; text-transform: uppercase; }
+.you-text { display: flex; flex-direction: column; flex: 1; min-width: 0; }
+.you-text strong { font-size: 17px; }
+.phone-actions { display: flex; flex-direction: column; gap: 6px; }
+.phone-action { display: flex; align-items: center; gap: 14px; width: 100%; padding: 12px 14px; border: 0; border-radius: 16px; background: var(--surface-2); color: var(--text); text-align: left; cursor: pointer; }
+.phone-action > span:last-child { display: flex; flex-direction: column; }
+.phone-action .icon { width: 22px; height: 22px; color: var(--accent); flex: none; }
+.phone-action:active { background: var(--surface-3); }
+#whoami .initial { display: none; }
+
+/* Pieces that only exist on phones (shown in the media query below). */
+.fab, .bottom-nav, .sheet-backdrop, .menu-title, .crumb-back { display: none; }
+
+/* ================================ Phones ================================ */
+@media (max-width: 700px) {
+  body { font-size: 15px; }
+  #drive-view { padding-bottom: calc(76px + env(safe-area-inset-bottom)); }
+  /* Header: just the search pill and your avatar. Usage, trash and sign out live under "You". */
+  .topbar { padding: 10px 16px 6px; gap: 10px; }
+  #drive-view .topbar .brand { font-size: 0; gap: 0; }
+  #drive-view .topbar .brand img { width: 30px; height: 30px; }
+  .search-box { margin: 0; max-width: none; }
+  .search-box input { height: 42px; padding: 0 16px; }
+  #usage, #trash-btn, #logout { display: none; }
+  #whoami { width: 38px; height: 38px; padding: 0; border-radius: 999px; font-size: 15px; font-weight: 650; text-transform: uppercase; display: grid; place-items: center; overflow: hidden; }
+  #whoami .full { display: none; }
+  #whoami .initial { display: inline; }
+
+  /* Folder title: the parent as a small back link, the current folder as a big title. */
+  .toolbar { padding: 8px 18px 10px; }
+  .crumbs { display: block; font-size: 26px; line-height: 1.15; }
+  .crumbs .sep, .crumbs button { display: none; }
+  .crumbs button.is-current { display: block; padding: 0; font-weight: 650; letter-spacing: -0.02em; text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+  .crumbs button.is-parent { display: inline-flex; align-items: center; gap: 2px; padding: 4px 0; font-size: 13.5px; color: var(--muted); }
+  .crumbs button.is-parent::before { content: "‹"; font-size: 18px; line-height: 1; margin-right: 2px; }
+  .crumbs button:hover { background: none; }
+  #drive-actions > :not(#selection-actions), #trash-actions #trash-back { display: none; }
+  .actions { width: 100%; }
+  .selection-actions { border: 0; padding: 0; margin: 0; width: 100%; justify-content: space-between; }
+
+  /* Files: big rows, colored tile, name with details underneath, no columns or checkboxes. */
+  .listing { width: auto; margin: 0 10px 24px; background: transparent; border-radius: 0; overflow: visible; }
+  .row-head { display: none; }
+  .row { grid-template-columns: minmax(0, 1fr) 44px; min-height: 64px; padding: 4px 8px; border: 0; border-radius: 18px; }
+  #rows .row:hover { background: transparent; }
+  #rows .row:active { background: var(--surface-2); }
+  .row .cell-check, .row .cell-size, .row .cell-date { display: none; }
+  .row .cell-name { gap: 14px; }
+  .row .cell-name > .muted.small { display: none; }
+  .tile { width: 46px; height: 46px; border-radius: 15px; }
+  .tile .icon { width: 24px; height: 24px; }
+  .name-wrap .name { font-size: 15.5px; font-weight: 500; }
+  .name-wrap .meta { display: block; }
+  .cell-name a:hover { text-decoration: none; }
+  .cell-menu { display: flex; justify-content: flex-end; }
+  .cell-menu button { width: 40px; height: 40px; font-size: 22px; }
+  /* Selection mode (long-press a file): checkboxes come back and the row lights up. */
+  body.selecting .row { grid-template-columns: 34px minmax(0, 1fr) 44px; }
+  body.selecting .row .cell-check { display: flex; }
+  body.selecting .row .cell-check input { width: 22px; height: 22px; }
+  .row.selected { background: var(--accent-soft) !important; }
+  /* Trash rows keep their two buttons. */
+  .row:has(.trash-row-actions) { grid-template-columns: minmax(0, 1fr) auto; }
+  .row:has(.trash-row-actions) .cell-menu { display: flex; gap: 6px; }
+
+  /* The + button and the "New" sheet. */
+  .fab { display: grid; place-items: center; position: fixed; right: 18px; bottom: calc(84px + env(safe-area-inset-bottom)); z-index: 15; width: 58px; height: 58px; border: 0; border-radius: 999px; background: var(--accent); color: var(--accent-text); box-shadow: var(--shadow); cursor: pointer; }
+  .fab .icon { width: 28px; height: 28px; }
+  .fab:active { transform: scale(0.96); }
+
+  /* Bottom bar: Files, Search, Trash, You. */
+  .bottom-nav { display: flex; position: fixed; left: 12px; right: 12px; bottom: calc(10px + env(safe-area-inset-bottom)); z-index: 14; height: 60px; padding: 6px; border-radius: 999px; background: color-mix(in srgb, var(--surface-2) 92%, transparent); backdrop-filter: blur(14px); box-shadow: var(--shadow); justify-content: space-around; }
+  .bottom-nav button { flex: 1; border: 0; background: none; border-radius: 999px; color: var(--muted); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; font-size: 11px; font-weight: 500; cursor: pointer; }
+  .bottom-nav button .icon { width: 22px; height: 22px; }
+  .bottom-nav button.active { color: var(--accent); background: var(--accent-soft); }
+  #public-share-view .bottom-nav, #public-share-view .fab { display: none; }
+
+  /* Menus become bottom sheets with big targets. */
+  .sheet-backdrop { display: block; position: fixed; inset: 0; z-index: 39; background: rgba(5, 10, 8, 0.45); }
+  .sheet-backdrop[hidden] { display: none !important; }
+  .menu { left: 8px !important; right: 8px; top: auto !important; bottom: calc(8px + env(safe-area-inset-bottom)); min-width: 0; padding: 10px 8px; border-radius: 26px; }
+  .menu-title { display: flex; align-items: center; gap: 12px; padding: 6px 12px 12px; margin-bottom: 4px; border-bottom: 1px solid var(--border); font-weight: 600; overflow: hidden; }
+  .menu-title span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .menu button { padding: 14px 14px; font-size: 15.5px; display: flex; align-items: center; gap: 14px; }
+  .menu button .icon { width: 22px; height: 22px; color: var(--muted); }
+  .menu .danger .icon { color: var(--danger); }
+
+  /* Uploads: a slim card above the bottom bar instead of a panel over the list. */
+  .uploads { left: 12px; right: 12px; width: auto; bottom: calc(80px + env(safe-area-inset-bottom)); max-height: 40vh; border-radius: 20px; }
+
+  /* Dialogs slide up from the bottom like sheets. */
+  dialog:not(.sheet-modal):not(.preview) { width: 100%; max-width: 100%; margin: auto 0 0; border-radius: 26px 26px 0 0; padding-bottom: env(safe-area-inset-bottom); }
+  .dialog-actions .btn { height: 44px; flex: 1; justify-content: center; }
+  dialog.account { max-height: 92vh; }
+  dialog.sheet-modal { width: 100vw; height: 100vh; max-height: 100vh; border-radius: 0; }
+  .toast { bottom: calc(84px + env(safe-area-inset-bottom)); }
 }

@@ -1,10 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="accent">#2F6FDE</color>
-    <style name="AppTheme" parent="android:Theme.Material.Light.DarkActionBar">
+    <color name="accent">#1E8A5B</color>
+    <!-- No title bar: the drive page draws its own header and bottom bar. -->
+    <style name="AppTheme" parent="android:Theme.Material.Light.NoActionBar">
         <item name="android:colorPrimary">@color/accent</item>
-        <item name="android:colorPrimaryDark">#1F4FA8</item>
         <item name="android:colorAccent">@color/accent</item>
+        <item name="android:windowBackground">@color/page_bg</item>
+        <item name="android:textColorPrimary">@color/page_text</item>
     </style>
     <style name="AppTheme.Translucent">
         <item name="android:windowIsTranslucent">true</item>

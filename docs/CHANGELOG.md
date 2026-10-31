@@ -3,6 +3,18 @@
 Write what changed under a new `## x.y.z` heading at the top, then run `npm run release -- x.y.z`.
 The section becomes the release notes.
 
+## 0.5.2
+
+- **New look: Night garden.** Deep green-black with soft mint at night, calm sage in light mode, rounded
+  shapes, and each kind of file in its own color, with photo thumbnails.
+- **Made for phones.** A + button for new documents, spreadsheets, folders, uploads and photos. A bottom bar
+  for Files, Search, Trash and You. Big rows with details under each name. Actions open in a bottom sheet,
+  and you long-press to select several files.
+- **Android app:** no more black title bar. Auto-upload, updates and the drive address moved into
+  *You → This phone*, and *Take a photo* opens the camera.
+- Clearer messages when an Android update is blocked (for example by Google Play Protect), and stalled
+  update downloads retry.
+
 ## 0.5.1
 
 The first release that updates itself. (0.5.0 was never published: its Mac build only made the Apple silicon `.dmg`.)

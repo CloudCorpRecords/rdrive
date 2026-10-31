@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Night garden, light ("day garden"): matches the page background in public/style.css. -->
+    <color name="page_bg">#F1F5F2</color>
+    <color name="page_text">#14201A</color>
+    <color name="launcher_bg">#17322A</color>
+</resources>
