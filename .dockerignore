@@ -5,3 +5,4 @@ test
 .github
 .claude
 *.md
+!public/vendor/LICENSES.md

@@ -6,7 +6,9 @@
   <title>rdrive</title>
   <link rel="icon" href="/icon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="/style.css">
+  <script src="/interop.js" defer></script>
   <script src="/sheet.js" defer></script>
+  <script src="/docs.js" defer></script>
   <script src="/app.js" defer></script>
 </head>
 <body>
@@ -85,6 +87,7 @@
           <button class="btn" id="move-selected">Move</button>
           <button class="btn btn-danger" id="delete-selected">Delete</button>
         </div>
+        <button class="btn" id="new-doc" title="Create a new RDocs document">+ Document</button>
         <button class="btn" id="new-sheet" title="Create a new RDrive Spreadsheet">+ Spreadsheet</button>
         <button class="btn" id="new-folder">New folder</button>
         <button class="btn" id="download-zip" title="Download this folder as .zip">Download .zip</button>
@@ -121,6 +124,7 @@
   <!-- Row menu -->
   <div id="menu" class="menu" role="menu" hidden>
     <button role="menuitem" data-act="open">Open</button>
+    <button role="menuitem" data-act="convert" id="menu-convert" hidden>Open as RDoc</button>
     <button role="menuitem" data-act="share">Share link…</button>
     <button role="menuitem" data-act="download" id="menu-download">Download</button>
     <button role="menuitem" data-act="copy">Make a copy</button>
@@ -188,7 +192,7 @@
           </label>
           <label>Optional password<input name="password" type="password" placeholder="Leave blank for anyone with the link" autocomplete="new-password"></label>
           <label id="share-edit-row" class="check-row" hidden>
-            <input type="checkbox" name="allowEdit"> Allow anyone with the link to edit this spreadsheet
+            <input type="checkbox" name="allowEdit"> Allow anyone with the link to edit
           </label>
           <p id="share-error" class="error"></p>
           <div><button class="btn btn-primary" type="submit">Create link</button></div>
@@ -223,7 +227,18 @@
         <span id="sheet-save-status" class="muted small">Saved</span>
       </div>
       <div class="sheet-top-actions">
-        <button class="btn small" id="sheet-export-csv" type="button">Export .csv</button>
+        <select id="sheet-export" class="select-sm" title="Download or save a copy in another format">
+          <option value="">Export…</option>
+          <optgroup label="Download as">
+            <option value="dl:xlsx">Excel (.xlsx)</option>
+            <option value="dl:ods">OpenDocument (.ods)</option>
+            <option value="dl:csv">CSV, this tab (.csv)</option>
+          </optgroup>
+          <optgroup label="Save a copy in this folder" data-copy-group>
+            <option value="copy:xlsx" data-copy>as Excel (.xlsx)</option>
+            <option value="copy:ods" data-copy>as OpenDocument (.ods)</option>
+          </optgroup>
+        </select>
         <button class="btn small btn-primary" id="sheet-save" type="button">Save</button>
         <button class="btn small btn-ghost" id="sheet-close" type="button">Close</button>
       </div>
@@ -262,6 +277,7 @@
       <button class="btn small" id="sheet-add-row" type="button">+ Rows</button>
       <button class="btn small" id="sheet-add-col" type="button">+ Cols</button>
     </div>
+    <div class="doc-banner" id="sheet-banner" hidden><span id="sheet-banner-text"></span><button class="btn small btn-primary" id="sheet-banner-action" type="button"></button></div>
     <div class="sheet-formula-bar">
       <span id="sheet-cell-addr" class="sheet-addr mono">A1</span>
       <span class="sheet-fx mono">fx</span>
@@ -276,6 +292,79 @@
         <button class="btn small" id="sheet-add-tab" type="button" title="Add sheet tab">+</button>
       </div>
       <div id="sheet-stats" class="muted small mono">Ready</div>
+    </div>
+  </dialog>
+
+  <!-- RDocs: Built-in Document Editor -->
+  <dialog id="doc-dialog" class="sheet-modal doc-modal">
+    <div class="sheet-top doc-chrome">
+      <div class="sheet-title-wrap">
+        <span class="badge doc-badge">Docs</span>
+        <strong id="doc-title">Untitled document.rdoc</strong>
+        <span id="doc-save-status" class="muted small">Saved</span>
+      </div>
+      <div class="sheet-top-actions">
+        <select id="doc-export" class="select-sm" title="Download, print or save a copy in another format">
+          <option value="">Export…</option>
+          <optgroup label="Download as">
+            <option value="dl:docx">Word (.docx)</option>
+            <option value="dl:odt">OpenDocument (.odt)</option>
+            <option value="dl:md">Markdown (.md)</option>
+            <option value="dl:html">Web page (.html)</option>
+            <option value="dl:txt">Plain text (.txt)</option>
+            <option value="pdf">PDF / Print…</option>
+          </optgroup>
+          <optgroup label="Save a copy in this folder" data-copy-group>
+            <option value="copy:docx" data-copy>as Word (.docx)</option>
+            <option value="copy:odt" data-copy>as OpenDocument (.odt)</option>
+            <option value="copy:md" data-copy>as Markdown (.md)</option>
+          </optgroup>
+        </select>
+        <button class="btn small btn-primary" id="doc-save" type="button">Save</button>
+        <button class="btn small btn-ghost" id="doc-close" type="button">Close</button>
+      </div>
+    </div>
+    <div class="sheet-toolbar doc-toolbar doc-chrome" id="doc-toolbar">
+      <button class="btn small" id="doc-undo" type="button" title="Undo (Ctrl+Z)">↶</button>
+      <button class="btn small" id="doc-redo" type="button" title="Redo (Ctrl+Y)">↷</button>
+      <span class="sheet-sep"></span>
+      <select id="doc-block" class="select-sm" title="Paragraph style">
+        <option value="p">Normal text</option>
+        <option value="h1">Heading 1</option>
+        <option value="h2">Heading 2</option>
+        <option value="h3">Heading 3</option>
+        <option value="blockquote">Quote</option>
+        <option value="pre">Code block</option>
+      </select>
+      <span class="sheet-sep"></span>
+      <button class="btn small" id="doc-bold" type="button" title="Bold (Ctrl+B)"><strong>B</strong></button>
+      <button class="btn small" id="doc-italic" type="button" title="Italic (Ctrl+I)"><em>I</em></button>
+      <button class="btn small" id="doc-underline" type="button" title="Underline (Ctrl+U)"><u>U</u></button>
+      <button class="btn small" id="doc-strike" type="button" title="Strikethrough"><s>S</s></button>
+      <button class="btn small" id="doc-link" type="button" title="Link (Ctrl+K)">Link</button>
+      <span class="sheet-sep"></span>
+      <button class="btn small" id="doc-ul" type="button" title="Bulleted list">• List</button>
+      <button class="btn small" id="doc-ol" type="button" title="Numbered list">1. List</button>
+      <button class="btn small" id="doc-outdent" type="button" title="Decrease indent">⇤</button>
+      <button class="btn small" id="doc-indent" type="button" title="Increase indent">⇥</button>
+      <span class="sheet-sep"></span>
+      <button class="btn small" id="doc-align-left" type="button" title="Align left">≡←</button>
+      <button class="btn small" id="doc-align-center" type="button" title="Center">≡</button>
+      <button class="btn small" id="doc-align-right" type="button" title="Align right">→≡</button>
+      <span class="sheet-sep"></span>
+      <button class="btn small" id="doc-table" type="button" title="Insert table">Table</button>
+      <button class="btn small" id="doc-image" type="button" title="Insert picture">Picture</button>
+      <input type="file" id="doc-image-input" accept="image/png,image/jpeg,image/gif,image/webp" hidden>
+      <button class="btn small" id="doc-hr" type="button" title="Horizontal line">―</button>
+      <button class="btn small" id="doc-clear" type="button" title="Clear formatting">Clear fmt</button>
+    </div>
+    <div class="doc-banner doc-chrome" id="doc-banner" hidden><span id="doc-banner-text"></span><button class="btn small btn-primary" id="doc-banner-action" type="button"></button></div>
+    <div class="doc-scroll">
+      <article id="doc-editor" class="doc-page" spellcheck="true" aria-label="Document"></article>
+    </div>
+    <div class="sheet-bottom doc-chrome">
+      <span id="doc-stats" class="muted small mono"></span>
+      <span class="muted small">Ctrl+S save · Ctrl+K link · Ctrl+P print</span>
     </div>
   </dialog>
 

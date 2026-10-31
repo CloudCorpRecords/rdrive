@@ -80,10 +80,28 @@ async function copyText(text, label = 'Copied to clipboard.') {
   }
 }
 
-function isSheetFile(name) {
-  const ext = String(name || '').split('.').pop().toLowerCase();
-  return ['rsheet', 'csv', 'tsv'].includes(ext);
+function extOf(name) {
+  return String(name || '').split('.').pop().toLowerCase();
 }
+
+function isSheetFile(name) {
+  return ['rsheet', 'csv', 'tsv', 'xlsx', 'ods'].includes(extOf(name));
+}
+
+function isDocFile(name) {
+  return ['rdoc', 'docx', 'odt'].includes(extOf(name));
+}
+
+function iconFor(entry) {
+  if (entry.type === 'folder') return 'folder';
+  if (isSheetFile(entry.name)) return 'sheet';
+  if (isDocFile(entry.name)) return 'doc';
+  return 'file';
+}
+
+// Files that can be turned into an editable RDoc / RDrive Sheet copy.
+const TO_RDOC = ['docx', 'odt', 'md', 'markdown', 'txt', 'html', 'htm'];
+const TO_RSHEET = ['xlsx', 'ods'];
 
 function svgIcon(kind) {
   const ns = 'http://www.w3.org/2000/svg';
@@ -97,6 +115,8 @@ function svgIcon(kind) {
     p.setAttribute('d', 'M3 6.5A2.5 2.5 0 0 1 5.5 4h3.6c.6 0 1.2.3 1.6.7L12 6h6.5A2.5 2.5 0 0 1 21 8.5v9a2.5 2.5 0 0 1-2.5 2.5h-13A2.5 2.5 0 0 1 3 17.5z');
   } else if (kind === 'sheet') {
     p.setAttribute('d', 'M5 3h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2zm0 4v3h6V7H5zm8 0v3h6V7h-6zm-8 5v3h6v-3H5zm8 0v3h6v-3h-6zm-8 5v2h6v-2H5zm8 0v2h6v-2h-6z');
+  } else if (kind === 'doc') {
+    p.setAttribute('d', 'M6.5 2h7.1c.4 0 .8.2 1.1.4l4.4 4.4c.3.3.4.7.4 1.1V19.5A2.5 2.5 0 0 1 17 22H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2zM7.5 11v1.6h9V11zm0 3.2v1.6h9v-1.6zm0 3.2V19h6v-1.6zM13 3.5V7c0 .8.7 1.5 1.5 1.5H18z');
   } else {
     p.setAttribute('d', 'M6.5 2h7.1c.4 0 .8.2 1.1.4l4.4 4.4c.3.3.4.7.4 1.1V19.5A2.5 2.5 0 0 1 17 22H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2zM13 3.5V7c0 .8.7 1.5 1.5 1.5H18z');
   }
@@ -106,6 +126,9 @@ function svgIcon(kind) {
 
 const PREVIEW = {
   sheet: ['rsheet', 'csv', 'tsv'],
+  doc: ['rdoc'],
+  officeDoc: ['docx', 'odt'],
+  officeSheet: ['xlsx', 'ods'],
   image: ['png', 'jpg', 'jpeg', 'gif', 'webp', 'avif', 'bmp'],
   video: ['mp4', 'webm', 'mov', 'm4v'],
   audio: ['mp3', 'wav', 'ogg', 'm4a', 'flac'],
@@ -360,7 +383,7 @@ function render() {
 
     const name = document.createElement('span');
     name.className = 'cell-name';
-    const iconType = entry.type === 'folder' ? 'folder' : isSheetFile(entry.name) ? 'sheet' : 'file';
+    const iconType = iconFor(entry);
     name.appendChild(svgIcon(iconType));
     const link = document.createElement('a');
     link.className = 'name';
@@ -434,7 +457,7 @@ function renderSearch() {
 
     const name = document.createElement('span');
     name.className = 'cell-name';
-    const iconType = entry.type === 'folder' ? 'folder' : isSheetFile(entry.name) ? 'sheet' : 'file';
+    const iconType = iconFor(entry);
     name.appendChild(svgIcon(iconType));
     const link = document.createElement('a');
     link.className = 'name';
@@ -495,7 +518,7 @@ function renderTrash() {
 
     const name = document.createElement('span');
     name.className = 'cell-name';
-    const iconType = item.type === 'folder' ? 'folder' : isSheetFile(item.name) ? 'sheet' : 'file';
+    const iconType = iconFor(item);
     name.appendChild(svgIcon(iconType));
     const label = document.createElement('span');
     label.className = 'name';
@@ -601,6 +624,9 @@ function openEntry(entry, baseDir = state.path) {
   if (entry.type === 'folder') return navigate(p);
   const kind = previewKind(entry.name);
   if (kind === 'sheet') return openSpreadsheet(entry.name, p);
+  if (kind === 'doc') return openDocument(entry.name, p);
+  if (kind === 'officeDoc') return viewOfficeDocument(entry.name, p);
+  if (kind === 'officeSheet') return viewOfficeSpreadsheet(entry.name, p);
   if (kind === 'pdf') return window.open(downloadUrl(p, true), '_blank', 'noopener');
   if (kind) return preview(entry.name, p, kind);
   download(p);
@@ -630,12 +656,158 @@ function openSpreadsheet(name, clientPath) {
         throw new Error(data.error || 'Save failed');
       }
     },
+    saveCopy: (fileName, blob) => saveBlobCopy(dir, fileName, blob),
     onSaved: () => {
       load();
       refreshUsage();
     },
   });
 }
+
+// ---------- RDocs and Office/OpenDocument files ----------
+
+async function fetchFile(clientPath) {
+  const res = await fetch(downloadUrl(clientPath, true), { credentials: 'same-origin' });
+  if (!res.ok) throw new Error('Could not load the file.');
+  return res;
+}
+
+async function putFile(dir, fileName, body, overwrite) {
+  const res = await fetch(`/api/upload?path=${encodeURIComponent(dir)}&name=${encodeURIComponent(fileName)}${overwrite ? '&overwrite=1' : ''}`, {
+    method: 'PUT',
+    headers: { 'X-Rdrive': '1', 'Content-Type': 'application/octet-stream' },
+    credentials: 'same-origin',
+    body,
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || 'Save failed');
+  return data.name;
+}
+
+// Saves an exported file next to the original; the server adds " (1)" if the name is taken.
+async function saveBlobCopy(dir, fileName, blob) {
+  const saved = await putFile(dir, fileName, blob, false);
+  load();
+  refreshUsage();
+  return saved;
+}
+
+function openDocument(name, clientPath) {
+  const dir = parentOf(clientPath);
+  const fileName = clientPath.split('/').pop();
+  window.RDriveDocs.openDocModal({
+    name,
+    loadHtml: async () => window.RDriveInterop.parseDoc(await (await fetchFile(clientPath)).text()).html,
+    saveHtml: (html) => putFile(dir, fileName, window.RDriveInterop.serializeDoc(html), true),
+    saveCopy: (copyName, blob) => saveBlobCopy(dir, copyName, blob),
+    onSaved: () => {
+      load();
+      refreshUsage();
+    },
+  });
+}
+
+// Turns a Word/OpenDocument/Markdown/text/HTML file into HTML for RDocs.
+async function fileToHtml(clientPath) {
+  const interop = window.RDriveInterop;
+  const ext = extOf(clientPath);
+  const res = await fetchFile(clientPath);
+  if (ext === 'docx') return interop.docxToHtml(await res.arrayBuffer(), { ...(await interop.load('mammoth')), DOMParser });
+  if (ext === 'odt') return interop.odtToHtml(await res.arrayBuffer(), { ...(await interop.load('JSZip')), DOMParser });
+  const text = await res.text();
+  if (ext === 'md' || ext === 'markdown') return interop.sanitizeHtml(interop.markdownToHtml(text));
+  if (ext === 'html' || ext === 'htm') return interop.sanitizeHtml(text);
+  return interop.textToHtml(text);
+}
+
+async function fileToWorkbook(clientPath) {
+  const interop = window.RDriveInterop;
+  const data = await (await fetchFile(clientPath)).arrayBuffer();
+  if (extOf(clientPath) === 'xlsx') return interop.xlsxToWorkbook(data, await interop.load('ExcelJS'));
+  return interop.odsToWorkbook(data, { ...(await interop.load('JSZip')), DOMParser });
+}
+
+function closeDialog(dlg) {
+  if (!dlg.open) return Promise.resolve();
+  return new Promise((resolve) => {
+    dlg.addEventListener('close', () => setTimeout(resolve, 0), { once: true });
+    dlg.close();
+  });
+}
+
+// Makes an editable .rdoc / .rsheet copy next to the original (which is never changed) and opens it.
+async function convertToEditable(name, clientPath) {
+  const dir = parentOf(clientPath);
+  const base = name.replace(/\.[^.]+$/, '') || name;
+  const toDoc = TO_RDOC.includes(extOf(name));
+  toast(`Making an editable copy of "${name}"…`);
+  try {
+    let saved;
+    if (toDoc) {
+      const html = await fileToHtml(clientPath);
+      saved = await putFile(dir, `${base}.rdoc`, window.RDriveInterop.serializeDoc(html), false);
+    } else {
+      const wb = await fileToWorkbook(clientPath);
+      saved = await putFile(dir, `${base}.rsheet`, JSON.stringify(wb, null, 2), false);
+    }
+    await load();
+    refreshUsage();
+    // Let the viewer's "close" event fire before the editor opens in the same dialog;
+    // otherwise the editor would receive it and tear down its own event handlers.
+    await closeDialog($('#doc-dialog'));
+    await closeDialog($('#sheet-dialog'));
+    const savedPath = joinPath(dir, saved);
+    if (toDoc) openDocument(saved, savedPath);
+    else openSpreadsheet(saved, savedPath);
+  } catch (ex) {
+    toast(ex.message || 'Could not convert the file.');
+  }
+}
+
+function viewOfficeDocument(name, clientPath) {
+  const label = extOf(name) === 'docx' ? 'Word document' : 'OpenDocument text';
+  window.RDriveDocs.openDocModal({
+    name,
+    readOnly: true,
+    loadHtml: () => fileToHtml(clientPath),
+    saveCopy: (copyName, blob) => saveBlobCopy(parentOf(clientPath), copyName, blob),
+    banner: {
+      text: `${label}, view only. Make an editable RDocs copy to change it. The original stays as it is.`,
+      actionLabel: 'Edit a copy',
+      onAction: () => convertToEditable(name, clientPath),
+    },
+  });
+}
+
+function viewOfficeSpreadsheet(name, clientPath) {
+  const label = extOf(name) === 'xlsx' ? 'Excel workbook' : 'OpenDocument spreadsheet';
+  window.RDriveSheets.openSheetModal({
+    name,
+    path: clientPath,
+    readOnly: true,
+    loadWorkbook: () => fileToWorkbook(clientPath),
+    saveCopy: (copyName, blob) => saveBlobCopy(parentOf(clientPath), copyName, blob),
+    banner: {
+      text: `${label}, view only. Make an editable RDrive Sheets copy to change it. The original stays as it is.`,
+      actionLabel: 'Edit a copy',
+      onAction: () => convertToEditable(name, clientPath),
+    },
+  });
+}
+
+async function createNewDocument() {
+  const name = await ask('New document', 'Untitled document', 'Create & open');
+  if (!name) return;
+  try {
+    const created = await api('POST', '/api/doc/create', { path: state.path, name });
+    await load();
+    refreshUsage();
+    openDocument(created.name, created.path);
+  } catch (ex) {
+    toast(ex.message);
+  }
+}
+window.rdriveCreateDocument = createNewDocument;
 
 function download(p, isFolder = false) {
   const a = document.createElement('a');
@@ -727,6 +899,8 @@ async function createNewSpreadsheet() {
 window.rdriveCreateSpreadsheet = createNewSpreadsheet;
 
 $('#new-sheet').addEventListener('click', createNewSpreadsheet);
+$('#new-doc').addEventListener('click', createNewDocument);
+window.rdriveAsk = ask;
 
 $('#new-folder').addEventListener('click', async () => {
   const name = await ask('New folder', 'Untitled folder', 'Create');
@@ -848,7 +1022,7 @@ async function openShareDialog(entry, baseDir = state.path) {
   $('#share-item-name').textContent = entry.name;
   $('#share-form').reset();
   $('#share-error').textContent = '';
-  $('#share-edit-row').hidden = !(entry.type === 'file' && isSheetFile(entry.name));
+  $('#share-edit-row').hidden = !(entry.type === 'file' && ['rsheet', 'csv', 'tsv', 'rdoc'].includes(extOf(entry.name)));
   $('#share-dialog').showModal();
   await renderShareList();
 }
@@ -871,7 +1045,7 @@ async function renderShareList() {
     const parts = [
       s.expires ? `Expires ${formatDate(s.expires)}` : 'Never expires',
       s.hasPassword ? 'Password protected' : 'Public link',
-      s.allowEdit ? 'Can edit sheet' : 'View / download',
+      s.allowEdit ? 'Anyone with the link can edit' : 'View / download',
     ];
     meta.textContent = parts.join(' · ');
     info.append(title, meta);
@@ -929,6 +1103,10 @@ function openMenu(entry, anchor, x, y) {
   const menu = $('#menu');
   state.menuTarget = entry;
   $('#menu-download').textContent = entry.type === 'folder' ? 'Download .zip' : 'Download';
+  const ext = extOf(entry.name);
+  const convert = $('#menu-convert');
+  convert.hidden = entry.type === 'folder' || !(TO_RDOC.includes(ext) || TO_RSHEET.includes(ext));
+  convert.textContent = TO_RSHEET.includes(ext) ? 'Edit a copy in RDrive Sheets' : 'Edit a copy in RDocs';
   menu.hidden = false;
   const r = anchor ? anchor.getBoundingClientRect() : { left: x, right: x, bottom: y, top: y };
   const w = menu.offsetWidth;
@@ -957,6 +1135,7 @@ $('#menu').addEventListener('click', (e) => {
   const baseDir = entry.dir || state.path;
   const p = entry.path || joinPath(baseDir, entry.name);
   if (act === 'open') openEntry(entry, baseDir);
+  if (act === 'convert') convertToEditable(entry.name, p);
   if (act === 'share') openShareDialog(entry, baseDir);
   if (act === 'download') download(p, entry.type === 'folder');
   if (act === 'copy') copyEntry(entry, baseDir);
@@ -1494,15 +1673,37 @@ async function bootPublicShare(shareId, subPath = '/') {
 
   $('#public-share-lock').hidden = true;
   $('#public-share-content').hidden = false;
-  $('#public-share-badge').textContent = info.allowEdit ? 'Shared spreadsheet (Editable)' : 'Shared link';
+  $('#public-share-badge').textContent = info.allowEdit ? (info.isDoc ? 'Shared document (editable)' : 'Shared spreadsheet (editable)') : 'Shared link';
 
   const dlUrl = `/api/public/share/download?id=${encodeURIComponent(shareId)}&sub=${encodeURIComponent(subPath)}`;
   $('#public-share-download').href = dlUrl;
   $('#public-share-download').textContent = info.type === 'folder' ? 'Download .zip' : 'Download';
 
   const openSheetBtn = $('#public-share-open-sheet');
-  openSheetBtn.hidden = !info.isSheet;
+  openSheetBtn.hidden = !info.isSheet && !info.isDoc;
+  if (info.isDoc) openSheetBtn.textContent = info.allowEdit ? 'Open & edit document' : 'Open document';
+  const saveShared = async (payload) => {
+    const r = await fetch(`/api/public/share/save?id=${encodeURIComponent(shareId)}`, {
+      method: 'PUT',
+      headers: { 'X-Rdrive': '1', 'Content-Type': 'application/octet-stream' },
+      credentials: 'same-origin',
+      body: payload,
+    });
+    if (!r.ok) throw new Error('Could not save the shared file.');
+  };
+  const launchSharedDoc = () =>
+    window.RDriveDocs.openDocModal({
+      name: info.name,
+      readOnly: !info.allowEdit,
+      loadHtml: async () => {
+        const r = await fetch(`${dlUrl}&inline=1`, { credentials: 'same-origin' });
+        if (!r.ok) throw new Error('Could not load the shared document.');
+        return window.RDriveInterop.parseDoc(await r.text()).html;
+      },
+      saveHtml: (html) => saveShared(window.RDriveInterop.serializeDoc(html)),
+    });
   const launchSharedSheet = () => {
+    if (info.isDoc) return launchSharedDoc();
     window.RDriveSheets.openSheetModal({
       name: info.name,
       path: info.name,
@@ -1537,7 +1738,7 @@ async function bootPublicShare(shareId, subPath = '/') {
     const check = document.createElement('span');
     const name = document.createElement('span');
     name.className = 'cell-name';
-    name.append(svgIcon(info.isSheet ? 'sheet' : 'file'), document.createTextNode(info.name));
+    name.append(svgIcon(info.isSheet ? 'sheet' : info.isDoc ? 'doc' : 'file'), document.createTextNode(info.name));
     const size = document.createElement('span');
     size.className = 'cell-size';
     size.textContent = formatSize(info.size);
@@ -1546,7 +1747,7 @@ async function bootPublicShare(shareId, subPath = '/') {
     date.textContent = formatDate(info.modified);
     row.append(check, name, size, date, document.createElement('span'));
     rows.appendChild(row);
-    if (info.isSheet) launchSharedSheet();
+    if (info.isSheet || info.isDoc) launchSharedSheet();
   } else if (Array.isArray(info.entries)) {
     for (const entry of info.entries) {
       const entrySub = joinPath(subPath, entry.name);
@@ -1555,7 +1756,7 @@ async function bootPublicShare(shareId, subPath = '/') {
       const check = document.createElement('span');
       const name = document.createElement('span');
       name.className = 'cell-name';
-      name.appendChild(svgIcon(entry.type === 'folder' ? 'folder' : isSheetFile(entry.name) ? 'sheet' : 'file'));
+      name.appendChild(svgIcon(iconFor(entry)));
       const link = document.createElement('a');
       link.className = 'name';
       link.textContent = entry.name;

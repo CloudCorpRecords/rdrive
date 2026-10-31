@@ -8,7 +8,9 @@ Raspberry Pi or a NAS. Then sign in from your phone, laptop or any other device 
 edit spreadsheets, share links and organise your files.
 
 - **Your files stay as normal files** in `data/files/<username>/`, so you can back them up or open them directly.
-- **Built-in RDrive Sheets:** create and edit `.rsheet`, `.csv` and `.tsv` spreadsheets right in the browser or Android app, with formulas (`SUM`, `AVERAGE`, `IF`, `COUNTIF`, `SUMIF`, `ROUND`, cross-sheet references, etc.), multi-sheet tabs, formatting, sorting, and CSV export.
+- **Built-in RDocs:** write and format documents (`.rdoc`) in the browser, desktop or Android app: headings, bold/italic/underline, lists, links, tables, pictures, autosave, and PDF printing.
+- **Built-in RDrive Sheets:** create and edit `.rsheet`, `.csv` and `.tsv` spreadsheets right in the browser or Android app, with formulas (`SUM`, `AVERAGE`, `IF`, `COUNTIF`, `SUMIF`, `ROUND`, cross-sheet references, etc.), multi-sheet tabs, formatting and sorting.
+- **Works with Office, Google and LibreOffice files:** open Word (`.docx`), Excel (`.xlsx`) and OpenDocument (`.odt`, `.ods`) files, make an editable copy, and export back to `.docx`, `.xlsx`, `.odt`, `.ods`, Markdown, HTML, text or CSV. See [Documents and spreadsheets](#documents-and-spreadsheets).
 - **Secure sign-in** with a password or **Sign in with GitHub** (single sign-on). Everything is encrypted with HTTPS.
 - **Share links:** create expiring, optionally password-protected links to any file, folder or spreadsheet (with optional collaborative editing for spreadsheets).
 - **Mount as a network drive (WebDAV):** mount `/dav/` in Windows Explorer, macOS Finder, Linux or mobile WebDAV clients.
@@ -22,6 +24,32 @@ edit spreadsheets, share links and organise your files.
 - **Desktop and Android apps:** a Windows/macOS app that hosts your drive in the background (or opens a drive hosted
   elsewhere), and an Android app with "Share → rdrive", "New spreadsheet…", and automatic folder upload.
 - **Small and auditable:** one runtime dependency, no database, and tested on every OS in CI.
+
+## Documents and spreadsheets
+
+**RDocs** (`+ Document`) and **RDrive Sheets** (`+ Spreadsheet`) are built in. They save automatically. Files are stored
+as plain JSON (`.rdoc`, `.rsheet`), so they stay readable and easy to back up.
+
+| You have | Open it in rdrive | Edit it | Export to |
+|---|---|---|---|
+| Word `.docx`, OpenDocument `.odt` | View, with formatting | **Edit a copy** creates an `.rdoc`; the original isn't changed | — |
+| Markdown `.md`, `.txt`, `.html` | Text preview | Row menu → **Edit a copy in RDocs** | — |
+| An RDoc (`.rdoc`) | RDocs editor | Directly | `.docx`, `.odt`, `.md`, `.html`, `.txt`, PDF (print) |
+| Excel `.xlsx`, OpenDocument `.ods` | View, with formulas and formatting | **Edit a copy** creates an `.rsheet` | — |
+| An RDrive Sheet (`.rsheet`) or `.csv`/`.tsv` | RDrive Sheets | Directly | `.xlsx`, `.ods` (all tabs, formulas, formatting), `.csv` |
+
+Exports can be downloaded or saved as a copy in the same folder. Formulas keep working in Excel, Google Sheets and
+LibreOffice: `.ods` files use OpenDocument formula syntax, and every formula carries its computed value. Moving to or
+from Google Drive works through these formats. Google Docs and Sheets download and upload `.docx`/`.xlsx`.
+
+Conversion happens in your browser using [mammoth](https://github.com/mwilliamson/mammoth.js),
+[docx](https://github.com/dolanmiu/docx), [ExcelJS](https://github.com/exceljs/exceljs) and
+[JSZip](https://github.com/Stuk/jszip). Their browser builds are in `public/vendor/` and load only when you import or
+export. Refresh them with `npm run vendor`. Everything a document shows is filtered through an allowlist, so shared or
+imported documents can't run scripts or load remote images.
+
+Share links work for documents too. Tick **Allow anyone with the link to edit** to let people edit an `.rdoc` in their
+browser, without an account.
 
 ## Apps
 
@@ -336,7 +364,8 @@ The code layout: `server.js` (routes and CLI), `lib/auth.js` (users, passwords, 
 ## Roadmap
 
 - More SSO providers (generic OpenID Connect: Google, Microsoft, Authentik, Keycloak)
-- XLSX binary import/export alongside `.rsheet` and `.csv`
+- Real-time co-editing and version history for documents and spreadsheets
+- Editing `.docx`/`.xlsx` files in place (today: edit a copy, then export)
 
 ## License
 

@@ -224,6 +224,9 @@ class MainActivity : Activity() {
 
     override fun onOptionsItemSelected(item: MenuItem): Boolean {
         when (item.itemId) {
+            R.id.new_document -> {
+                web?.evaluateJavascript("window.rdriveCreateDocument && window.rdriveCreateDocument()", null)
+            }
             R.id.new_spreadsheet -> {
                 web?.evaluateJavascript("window.rdriveCreateSpreadsheet && window.rdriveCreateSpreadsheet()", null)
             }
