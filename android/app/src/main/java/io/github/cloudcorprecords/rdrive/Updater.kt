@@ -63,6 +63,8 @@ object Updater {
         if (c.responseCode != 200) throw IOException("GitHub said ${c.responseCode}")
         val d = JSONObject(c.inputStream.bufferedReader().use { it.readText() })
         val version = d.optString("tag_name").removePrefix("v")
+        // The version becomes a file name in the app's cache: only plain x.y.z is accepted.
+        if (!Regex("^\\d{1,4}\\.\\d{1,4}\\.\\d{1,4}$").matches(version)) throw IOException("The latest release has an unexpected version.")
         val assets = d.optJSONArray("assets")
         var apk: Pair<String, String>? = null
         var sums: String? = null

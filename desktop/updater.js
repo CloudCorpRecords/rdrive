@@ -78,6 +78,8 @@ async function latest() {
   if (!r.ok) throw new Error(r.status === 403 ? 'GitHub is limiting requests right now; try again later' : `GitHub said ${r.status}`);
   const d = await r.json();
   const version = String(d.tag_name || '').replace(/^v/, '');
+  // The version ends up in file names and the Mac swap script's arguments: only plain x.y.z is accepted.
+  if (!/^\d{1,4}\.\d{1,4}\.\d{1,4}$/.test(version)) throw new Error(`the latest release has an unexpected version (${version.slice(0, 40)})`);
   const assets = d.assets || [];
   return {
     version,
@@ -151,12 +153,12 @@ async function stage(release, onProgress) {
   fs.rmSync(WORK, { recursive: true, force: true });
   fs.mkdirSync(WORK, { recursive: true });
   if (!release.sums) throw new Error('the release has no SHA256SUMS.txt to check the download against');
-  const dest = path.join(WORK, release.file.name);
-  log('downloading', release.file.name);
+  const dest = path.join(WORK, assetName(release.version)); // built from the checked version, never the server's name
+  log('downloading', path.basename(dest));
   await download(release.file.browser_download_url, dest, (got, total) => onProgress && total && onProgress(got / total));
   const sumsPath = path.join(WORK, 'SHA256SUMS.txt');
   await download(release.sums.browser_download_url, sumsPath);
-  const line = fs.readFileSync(sumsPath, 'utf8').split(/\r?\n/).find((l) => l.trim().split(/\s+/).pop() === release.file.name);
+  const line = fs.readFileSync(sumsPath, 'utf8').split(/\r?\n/).find((l) => l.trim().split(/\s+/).pop() === path.basename(dest));
   const want = line && line.trim().split(/\s+/)[0].toLowerCase();
   const got = await sha256(dest);
   if (!want || want !== got) throw new Error("the download's checksum doesn't match the release");

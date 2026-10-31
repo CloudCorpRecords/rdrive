@@ -36,10 +36,14 @@ const PLACES = [
 const read = (rel) => fs.readFileSync(path.join(ROOT, rel), 'utf8');
 const current = () => JSON.parse(read('package.json')).version;
 
+// The lines under "## <version>" up to the next "## " heading (plain text matching, no regex from input).
 function changelogSection(version) {
-  const text = read('docs/CHANGELOG.md');
-  const m = new RegExp(`^## ${version.replace(/\./g, '\\.')}\\s*\\n([\\s\\S]*?)(?=^## |(?![\\s\\S]))`, 'm').exec(text);
-  return m ? m[1].trim() : '';
+  const lines = read('docs/CHANGELOG.md').split(/\r?\n/);
+  const start = lines.findIndex((l) => l.trim() === `## ${version}`);
+  if (start < 0) return '';
+  const rest = lines.slice(start + 1);
+  const end = rest.findIndex((l) => l.startsWith('## '));
+  return (end < 0 ? rest : rest.slice(0, end)).join('\n').trim();
 }
 
 function notes(version) {
