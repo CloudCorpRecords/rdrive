@@ -196,6 +196,9 @@ input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--accent);
 .menu .danger { color: var(--danger); }
 
 /* Dialogs */
+dialog:not([open]) {
+  display: none !important;
+}
 dialog {
   border: 1px solid var(--border); border-radius: 14px; padding: 0; background: var(--surface); color: var(--text);
   box-shadow: var(--shadow); width: min(420px, calc(100vw - 32px));
@@ -713,10 +716,10 @@ input:not([type="checkbox"]):focus-visible { outline: 2px solid var(--accent); o
   }
   .dialog-actions .btn { height: 44px; flex: 1; justify-content: center; }
   dialog.account { max-height: 92vh; }
-  dialog.sheet-modal,
-  dialog.xod-dialog,
-  dialog.code-editor-dialog,
-  dialog.preview {
+  dialog.sheet-modal[open],
+  dialog.xod-dialog[open],
+  dialog.code-editor-dialog[open],
+  dialog.preview[open] {
     position: fixed !important;
     inset: 0 !important;
     top: 0 !important;
@@ -1378,10 +1381,15 @@ input:not([type="checkbox"]):focus-visible { outline: 2px solid var(--accent); o
   border: 1px solid var(--border);
   border-radius: var(--radius);
   box-shadow: var(--shadow);
-  display: flex;
-  flex-direction: column;
   padding: 0;
   overflow: hidden;
+}
+.code-editor-dialog[open] {
+  display: flex;
+  flex-direction: column;
+}
+.code-editor-dialog:not([open]) {
+  display: none !important;
 }
 .code-editor-head {
   display: flex;
@@ -1434,11 +1442,16 @@ input:not([type="checkbox"]):focus-visible { outline: 2px solid var(--accent); o
   border: 1px solid var(--border);
   border-radius: var(--radius);
   box-shadow: var(--shadow);
-  display: flex;
-  flex-direction: column;
   padding: 0;
   color: var(--text);
   overflow: hidden;
+}
+.xod-dialog[open] {
+  display: flex;
+  flex-direction: column;
+}
+.xod-dialog:not([open]) {
+  display: none !important;
 }
 .xod-head {
   padding: 12px 18px;
@@ -1707,4 +1720,4 @@ input:not([type="checkbox"]):focus-visible { outline: 2px solid var(--accent); o
 
 
 
-.xod-dialog:not([open]) { display: none; }
+.xod-dialog:not([open]) { display: none !important; }

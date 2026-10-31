@@ -198,7 +198,12 @@ class MainActivity : Activity() {
             }
             // Certificate errors are never overridden: an invalid certificate means "don't connect".
         }
+        WebView.setWebContentsDebuggingEnabled(true)
         w.webChromeClient = object : WebChromeClient() {
+            override fun onConsoleMessage(cm: android.webkit.ConsoleMessage): Boolean {
+                android.util.Log.i("RDriveWeb", "${cm.sourceId()}:${cm.lineNumber()} [${cm.messageLevel()}] ${cm.message()}")
+                return true
+            }
             override fun onShowFileChooser(view: WebView, callback: ValueCallback<Array<Uri>>, params: FileChooserParams): Boolean {
                 fileCallback?.onReceiveValue(null)
                 fileCallback = callback
@@ -261,8 +266,9 @@ class MainActivity : Activity() {
         setContentView(frame)
         applyInsets(frame, padBottom = true)
         val startUrl = pendingPairUrl ?: url
+        val hadPending = pendingPairUrl != null
         pendingPairUrl = null
-        if (state == null || w.restoreState(state) == null) w.loadUrl(startUrl)
+        if (hadPending || state == null || w.restoreState(state) == null) w.loadUrl(startUrl)
     }
 
     private fun isGithubSignIn(u: Uri): Boolean {

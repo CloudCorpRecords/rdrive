@@ -350,7 +350,8 @@ $('#logout').addEventListener('click', async () => {
 // ---------- drive, search & trash ----------
 
 function pathFromHash() {
-  const raw = location.hash.replace(/^#/, '') || '/';
+  if (!location.hash || !location.hash.startsWith('#/')) return '/';
+  const raw = location.hash.slice(2) || '/';
   try {
     return '/' + raw.split('/').filter(Boolean).map(decodeURIComponent).join('/');
   } catch {
@@ -368,6 +369,7 @@ function navigate(p) {
 }
 
 function showDrive() {
+  console.log('[RDrive] showDrive() called, location.hash=' + location.hash);
   $('#auth-view').hidden = true;
   $('#public-share-view').hidden = true;
   $('#drive-view').hidden = false;
@@ -378,6 +380,7 @@ function showDrive() {
   $('#whoami').setAttribute('aria-label', `Account: ${state.user}`);
   if (location.hash === '#photos') loadPhotos('all');
   else if (location.hash === '#starred') loadStarred();
+  else if (location.hash === '#xod') { load(); openXodDialog(); }
   else load();
   refreshUsage();
 }
@@ -386,6 +389,7 @@ async function load() {
   state.selected.clear();
   $('#photos-view').hidden = true;
   $('#listing').hidden = false;
+  console.log('[RDrive] load() start, path=' + state.path + ' hash=' + location.hash);
   setNav(state.view === 'trash' ? 'trash' : state.view === 'search' ? 'search' : 'files');
   $('#drive-actions').hidden = state.view === 'trash';
   $('#trash-actions').hidden = state.view !== 'trash';
@@ -422,16 +426,20 @@ async function load() {
 
   state.view = 'drive';
   state.path = pathFromHash();
+  console.log('[RDrive] fetching /api/list for path=' + state.path);
   try {
     const data = await api('GET', `/api/list?path=${encodeURIComponent(state.path)}`);
+    console.log('[RDrive] /api/list SUCCESS, entries=' + (data.entries ? data.entries.length : 'none'));
     state.entries = data.entries;
     if (Array.isArray(data.starred)) state.starred = new Set(data.starred);
   } catch (ex) {
+    console.log('[RDrive] /api/list ERROR: ' + ex.message);
     if (!state.user) return;
     toast(ex.message);
     if (state.path !== '/') return navigate('/');
     state.entries = [];
   }
+  console.log('[RDrive] calling render(), entries count=' + state.entries.length);
   render();
 }
 
@@ -2854,6 +2862,10 @@ window.addEventListener('hashchange', () => {
   else if (location.hash === '#xod') openXodDialog();
   else if (location.hash === '#scan') { $('#scanner-input').click(); }
   else if (location.hash === '#new-doc') { createNewDocument(); }
+  else {
+    state.view = 'drive';
+    load();
+  }
 });
 
 // ==================== Encrypted Private Vault ====================
@@ -3540,6 +3552,7 @@ $('#xod-quick-chips').addEventListener('click', (e) => {
 $('#xod-close').addEventListener('click', () => $('#xod-dialog').close());
 
 (async function boot() {
+  console.log('[RDrive] boot() start: pathname=' + location.pathname + ' hash=' + location.hash);
   if (location.pathname === '/pair' || location.pathname.startsWith('/pair/')) {
     return bootPair();
   }

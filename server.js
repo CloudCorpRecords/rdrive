@@ -59,6 +59,7 @@ const STATIC = {
   '/vendor/mammoth.browser.min.js': ['vendor/mammoth.browser.min.js', 'text/javascript; charset=utf-8'],
   '/vendor/docx.iife.js': ['vendor/docx.iife.js', 'text/javascript; charset=utf-8'],
   '/vendor/qrcode.js': ['vendor/qrcode.js', 'text/javascript; charset=utf-8'],
+  '/vendor/sql_engine.js': ['vendor/sql_engine.js', 'text/javascript; charset=utf-8'],
   '/style.css': ['style.css', 'text/css; charset=utf-8'],
   '/icon.svg': ['icon.svg', 'image/svg+xml'],
   '/manifest.json': ['manifest.json', 'application/manifest+json; charset=utf-8'],
@@ -85,7 +86,7 @@ function securityHeaders(res) {
   res.setHeader('Cross-Origin-Opener-Policy', 'same-origin');
   res.setHeader(
     'Content-Security-Policy',
-    "default-src 'self'; img-src 'self' blob: data:; media-src 'self' blob:; frame-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'"
+    "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; media-src 'self' blob:; frame-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'"
   );
 }
 
