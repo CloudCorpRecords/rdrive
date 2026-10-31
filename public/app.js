@@ -5,9 +5,10 @@ const $ = (sel) => document.querySelector(sel);
 const state = {
   user: null,
   path: '/',
-  view: 'drive', // 'drive' | 'trash' | 'search'
+  view: 'drive', // 'drive' | 'trash' | 'search' | 'photos' | 'starred'
   searchQuery: '',
   entries: [],
+  starred: new Set(),
   selected: new Set(),
   menuTarget: null,
 };
@@ -163,6 +164,8 @@ const UI_ICONS = {
   move: 'M4 7.5A2.5 2.5 0 0 1 6.5 5H9l2 2h6.5A2.5 2.5 0 0 1 20 9.5v7a2.5 2.5 0 0 1-2.5 2.5h-11A2.5 2.5 0 0 1 4 16.5zM9.5 13h6M13 10.5l2.5 2.5-2.5 2.5',
   more: 'M6 12h.01M12 12h.01M18 12h.01',
   cloud: 'M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z',
+  star: 'M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z',
+  info: 'M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20zM12 16v-4M12 8h.01',
   backup: 'M12 18v-8m-4 4 4-4 4 4M20 16.58A5 5 0 0 0 18 7h-1.26A8 8 0 1 0 4 15.25',
   phone: 'M7 4.5h10a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2v-11a2 2 0 0 1 2-2zM11 17.5h2',
 };
@@ -370,7 +373,9 @@ function showDrive() {
   const initial = Object.assign(document.createElement('span'), { className: 'initial', textContent: state.user.slice(0, 1) });
   $('#whoami').replaceChildren(full, initial);
   $('#whoami').setAttribute('aria-label', `Account: ${state.user}`);
-  load();
+  if (location.hash === '#photos') loadPhotos('all');
+  else if (location.hash === '#starred') loadStarred();
+  else load();
   refreshUsage();
 }
 
@@ -396,6 +401,10 @@ async function load() {
     return;
   }
 
+  if (state.view === 'starred') {
+    return loadStarred();
+  }
+
   if (state.view === 'search' && state.searchQuery) {
     try {
       const data = await api('GET', `/api/search?q=${encodeURIComponent(state.searchQuery)}`);
@@ -413,6 +422,7 @@ async function load() {
   try {
     const data = await api('GET', `/api/list?path=${encodeURIComponent(state.path)}`);
     state.entries = data.entries;
+    if (Array.isArray(data.starred)) state.starred = new Set(data.starred);
   } catch (ex) {
     if (!state.user) return;
     toast(ex.message);
@@ -498,6 +508,42 @@ function renderCrumbs(container, p, onClick, dropTargets) {
   });
 }
 
+function starButton(targetPath) {
+  const isStarred = state.starred && state.starred.has(targetPath);
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = `star-btn ${isStarred ? 'active' : ''}`;
+  btn.title = isStarred ? 'Unstar' : 'Star';
+  btn.appendChild(uiIcon('star'));
+  btn.addEventListener('click', async (e) => {
+    e.stopPropagation();
+    await toggleStarPath(targetPath);
+    const nowStarred = state.starred.has(targetPath);
+    btn.classList.toggle('active', nowStarred);
+    btn.title = nowStarred ? 'Unstar' : 'Star';
+    if (state.view === 'starred' && !nowStarred) loadStarred();
+  });
+  return btn;
+}
+
+function haptic(ms = 12) {
+  try {
+    if (window.RDriveApp && window.RDriveApp.vibrate) window.RDriveApp.vibrate(ms);
+    else if (navigator.vibrate) navigator.vibrate(ms);
+  } catch {}
+}
+
+async function toggleStarPath(targetPath) {
+  try {
+    const res = await api('POST', '/api/starred/toggle', { path: targetPath });
+    if (res.starred) state.starred.add(targetPath);
+    else state.starred.delete(targetPath);
+    haptic(15);
+  } catch (err) {
+    toast(err.message);
+  }
+}
+
 function render() {
   renderCrumbs($('#crumbs'), state.path, navigate, true);
   $('#select-all').disabled = false;
@@ -526,6 +572,7 @@ function render() {
     const name = document.createElement('span');
     name.className = 'cell-name';
     name.appendChild(fileTile(entry, p));
+    name.appendChild(starButton(entry.path || p));
     const link = document.createElement('a');
     link.className = 'name';
     link.textContent = entry.name;
@@ -827,7 +874,8 @@ function openEntry(entry, baseDir = state.path) {
   if (kind === 'doc') return openDocument(entry.name, p);
   if (kind === 'officeDoc') return viewOfficeDocument(entry.name, p);
   if (kind === 'officeSheet') return viewOfficeSpreadsheet(entry.name, p);
-  if (kind === 'pdf') return window.open(downloadUrl(p, true), '_blank', 'noopener');
+  if (kind === 'audio') return playAudioDock(entry.name, p);
+  if (kind === 'pdf') return preview(entry.name, p, 'pdf');
   if (kind) return preview(entry.name, p, kind);
   download(p);
 }
@@ -1036,6 +1084,13 @@ async function preview(name, p, kind) {
     el.controls = true;
     el.autoplay = true;
     el.src = downloadUrl(p, true);
+  } else if (kind === 'pdf') {
+    el = document.createElement('iframe');
+    el.src = downloadUrl(p, true);
+    el.style.width = '100%';
+    el.style.height = '78vh';
+    el.style.border = 'none';
+    el.style.borderRadius = '8px';
   } else {
     el = document.createElement('pre');
     el.textContent = 'Loading…';
@@ -1315,6 +1370,9 @@ function openMenu(entry, anchor, x, y) {
   const menu = $('#menu');
   state.menuTarget = entry;
   $('#menu-download').querySelector('.label').textContent = entry.type === 'folder' ? 'Download .zip' : 'Download';
+  const isStarred = state.starred && state.starred.has(entry.path || joinPath(entry.dir || state.path, entry.name));
+  const starLabel = $('#menu-star')?.querySelector('.label');
+  if (starLabel) starLabel.textContent = isStarred ? 'Unstar' : 'Star';
   const ext = extOf(entry.name);
   const convert = $('#menu-convert');
   convert.hidden = entry.type === 'folder' || !(TO_RDOC.includes(ext) || TO_RSHEET.includes(ext));
@@ -1361,6 +1419,7 @@ $('#new-menu').addEventListener('click', (e) => {
   if (!item) return;
   closeMenu();
   const what = item.dataset.new;
+  if (what === 'scan') $('#scanner-input').click();
   if (what === 'doc') createNewDocument();
   if (what === 'sheet') createNewSpreadsheet();
   if (what === 'folder') $('#new-folder').click();
@@ -1377,6 +1436,12 @@ $('#camera-input').addEventListener('change', (e) => {
 function setNav(which) {
   for (const b of document.querySelectorAll('#bottom-nav [data-nav]')) b.classList.toggle('active', b.dataset.nav === which);
   $('#fab').hidden = which === 'trash' || which === 'photos';
+  $('#photos-btn').classList.toggle('btn-primary', which === 'photos');
+  $('#photos-btn').classList.toggle('btn-ghost', which !== 'photos');
+  $('#starred-btn').classList.toggle('btn-primary', which === 'starred');
+  $('#starred-btn').classList.toggle('btn-ghost', which !== 'starred');
+  $('#trash-btn').classList.toggle('btn-primary', which === 'trash');
+  $('#trash-btn').classList.toggle('btn-ghost', which !== 'trash');
 }
 
 $('#bottom-nav').addEventListener('click', (e) => {
@@ -1394,6 +1459,10 @@ $('#bottom-nav').addEventListener('click', (e) => {
     $('#search-input').value = '';
     state.searchQuery = '';
     loadPhotos('all');
+  } else if (nav === 'starred') {
+    $('#search-input').value = '';
+    state.searchQuery = '';
+    loadStarred();
   } else if (nav === 'search') {
     setNav('search');
     window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -1413,6 +1482,12 @@ $('#photos-btn').addEventListener('click', () => {
   $('#search-input').value = '';
   state.searchQuery = '';
   loadPhotos('all');
+});
+
+$('#starred-btn').addEventListener('click', () => {
+  $('#search-input').value = '';
+  state.searchQuery = '';
+  loadStarred();
 });
 
 let currentPhotoItems = [];
@@ -1579,12 +1654,16 @@ document.addEventListener('keydown', (e) => {
 });
 
 $('#menu').addEventListener('click', (e) => {
-  const act = e.target.dataset.act;
+  const item = e.target.closest('[data-act]');
+  if (!item) return;
+  const act = item.dataset.act;
   const entry = state.menuTarget;
   closeMenu();
   if (!act || !entry) return;
   const baseDir = entry.dir || state.path;
   const p = entry.path || joinPath(baseDir, entry.name);
+  if (act === 'star') toggleStarPath(p);
+  if (act === 'details') openDetailsDialog(entry, p);
   if (act === 'open') openEntry(entry, baseDir);
   if (act === 'convert') convertToEditable(entry.name, p);
   if (act === 'share') openShareDialog(entry, baseDir);
@@ -2522,6 +2601,233 @@ async function bootPublicShare(shareId, subPath = '/') {
 
 window.addEventListener('hashchange', () => {
   if (state.user) load();
+});
+
+// ==================== Starred View ====================
+async function loadStarred() {
+  state.view = 'starred';
+  setNav('starred');
+  $('#photos-view').hidden = true;
+  $('#listing').hidden = false;
+  $('#crumbs').innerHTML = '<span><a href="#/">My Drive</a></span><span class="crumb-sep">/</span><span>Starred</span>';
+  $('#drive-actions').hidden = true;
+  $('#trash-actions').hidden = true;
+  $('#select-all').disabled = true;
+
+  try {
+    const data = await api('GET', '/api/starred');
+    state.entries = data.items || [];
+    if (Array.isArray(data.starred)) state.starred = new Set(data.starred);
+  } catch (err) {
+    toast(err.message);
+    state.entries = [];
+  }
+  render();
+  $('#empty').hidden = state.entries.length > 0;
+  $('#empty-title').textContent = 'No starred files yet.';
+  $('#empty-sub').textContent = 'Star files or folders to find them easily here.';
+}
+
+// ==================== File Details & QR Inspector ====================
+function openDetailsDialog(entry, p) {
+  const dlg = $('#details-dialog');
+  $('#details-filename').textContent = entry.name;
+  $('#details-path').textContent = p;
+  $('#details-kind').textContent = kindOf(entry);
+  $('#details-size').textContent = entry.type === 'folder' ? '—' : formatSize(entry.size);
+  $('#details-modified').textContent = formatDate(entry.modified);
+  const isStarred = state.starred && state.starred.has(p);
+  $('#details-starred').textContent = isStarred ? 'Yes ★' : 'No';
+  $('#details-star-btn').textContent = isStarred ? 'Unstar' : 'Star';
+
+  const iconContainer = $('#details-icon');
+  iconContainer.replaceChildren(uiIcon(iconFor(entry)));
+
+  // Generate QR code for mobile
+  const qrContainer = $('#details-qrcode');
+  qrContainer.replaceChildren();
+  if (window.QRCode) {
+    const directUrl = `${location.origin}${downloadUrl(p, true)}`;
+    new QRCode(qrContainer, {
+      text: directUrl,
+      width: 140,
+      height: 140,
+      correctLevel: QRCode.CorrectLevel.M
+    });
+  }
+
+  $('#details-open-btn').onclick = () => {
+    dlg.close();
+    openEntry(entry);
+  };
+  $('#details-star-btn').onclick = async () => {
+    await toggleStarPath(p);
+    const nowStarred = state.starred.has(p);
+    $('#details-starred').textContent = nowStarred ? 'Yes ★' : 'No';
+    $('#details-star-btn').textContent = nowStarred ? 'Unstar' : 'Star';
+    if (state.view === 'starred' && !nowStarred) loadStarred();
+  };
+  $('#details-download-btn').href = downloadUrl(p);
+  $('#details-download-btn').setAttribute('download', entry.name);
+  $('#details-share-btn').onclick = () => {
+    dlg.close();
+    openShareDialog(entry, entry.dir || state.path);
+  };
+
+  dlg.showModal();
+}
+$('#details-close').addEventListener('click', () => $('#details-dialog').close());
+
+// ==================== Persistent Audio Player Dock ====================
+function playAudioDock(name, p) {
+  const dock = $('#audio-dock');
+  const title = $('#audio-dock-title');
+  const time = $('#audio-dock-time');
+  const audio = $('#audio-dock-element');
+  const playLabel = $('#audio-dock-play-label');
+  const seek = $('#audio-dock-seek');
+
+  dock.hidden = false;
+  title.textContent = name;
+  audio.src = downloadUrl(p, true);
+  audio.play().catch(() => {});
+  playLabel.textContent = '⏸';
+
+  audio.ontimeupdate = () => {
+    if (audio.duration) {
+      seek.value = (audio.currentTime / audio.duration) * 100;
+      time.textContent = `${formatAudioTime(audio.currentTime)} / ${formatAudioTime(audio.duration)}`;
+    }
+  };
+
+  audio.onended = () => {
+    playLabel.textContent = '▶';
+  };
+}
+
+function formatAudioTime(sec) {
+  if (isNaN(sec)) return '0:00';
+  const m = Math.floor(sec / 60);
+  const s = Math.floor(sec % 60);
+  return `${m}:${s < 10 ? '0' : ''}${s}`;
+}
+
+$('#audio-dock-play').addEventListener('click', () => {
+  const audio = $('#audio-dock-element');
+  const playLabel = $('#audio-dock-play-label');
+  if (audio.paused) {
+    audio.play();
+    playLabel.textContent = '⏸';
+  } else {
+    audio.pause();
+    playLabel.textContent = '▶';
+  }
+});
+$('#audio-dock-seek').addEventListener('input', (e) => {
+  const audio = $('#audio-dock-element');
+  if (audio.duration) {
+    audio.currentTime = (e.target.value / 100) * audio.duration;
+  }
+});
+$('#audio-dock-close').addEventListener('click', () => {
+  const audio = $('#audio-dock-element');
+  audio.pause();
+  audio.src = '';
+  $('#audio-dock').hidden = true;
+});
+
+// ==================== Mobile Document Camera Scanner ====================
+$('#scanner-input').addEventListener('change', async (e) => {
+  const file = e.target.files?.[0];
+  if (!file) return;
+  e.target.value = '';
+  toast('Processing scanned document…');
+
+  const img = new Image();
+  const url = URL.createObjectURL(file);
+  img.onload = async () => {
+    URL.revokeObjectURL(url);
+    const canvas = document.createElement('canvas');
+    canvas.width = img.width;
+    canvas.height = img.height;
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(img, 0, 0);
+
+    // Document contrast & binarization shader
+    try {
+      const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      const d = imgData.data;
+      for (let i = 0; i < d.length; i += 4) {
+        const gray = (d[i] * 0.299 + d[i + 1] * 0.587 + d[i + 2] * 0.114);
+        const val = gray > 135 ? Math.min(255, gray * 1.15) : Math.max(0, gray * 0.85);
+        d[i] = val;
+        d[i + 1] = val;
+        d[i + 2] = val;
+      }
+      ctx.putImageData(imgData, 0, 0);
+    } catch {}
+
+    canvas.toBlob(async (blob) => {
+      const now = new Date();
+      const stamp = now.getFullYear() +
+        String(now.getMonth() + 1).padStart(2, '0') +
+        String(now.getDate()).padStart(2, '0') + '_' +
+        String(now.getHours()).padStart(2, '0') +
+        String(now.getMinutes()).padStart(2, '0') +
+        String(now.getSeconds()).padStart(2, '0');
+      const scanName = `Scan_${stamp}.jpg`;
+      const targetDir = state.path === '/' ? '/Scans' : state.path;
+
+      if (state.path === '/') {
+        try { await api('POST', '/api/mkdir', { path: '/', name: 'Scans' }); } catch {}
+      }
+
+      const scanFile = new File([blob], scanName, { type: 'image/jpeg' });
+      queueUploads([{ file: scanFile, dir: targetDir }]);
+      toast(`Document scanned and uploaded to ${targetDir}`);
+      if (navigator.vibrate) navigator.vibrate(25);
+    }, 'image/jpeg', 0.92);
+  };
+  img.src = url;
+});
+
+// ==================== Pull to Refresh & Haptic Gesture ====================
+let touchStartY = 0;
+let isPulling = false;
+window.addEventListener('touchstart', (e) => {
+  if (window.scrollY === 0) {
+    touchStartY = e.touches[0].clientY;
+    isPulling = true;
+  }
+}, { passive: true });
+
+window.addEventListener('touchmove', (e) => {
+  if (!isPulling || window.scrollY > 0) return;
+  const pullDistance = e.touches[0].clientY - touchStartY;
+  if (pullDistance > 60) {
+    $('#pull-refresh').hidden = false;
+  }
+}, { passive: true });
+
+window.addEventListener('touchend', async (e) => {
+  if (!isPulling) return;
+  const pullDistance = e.changedTouches[0].clientY - touchStartY;
+  isPulling = false;
+  if (pullDistance > 75 && window.scrollY === 0) {
+    if (navigator.vibrate) navigator.vibrate(15);
+    if (state.view === 'photos') await loadPhotos('all');
+    else if (state.view === 'starred') await loadStarred();
+    else await load();
+  }
+  $('#pull-refresh').hidden = true;
+}, { passive: true });
+
+// PWA / App Shortcuts router
+window.addEventListener('hashchange', () => {
+  if (location.hash === '#photos') loadPhotos('all');
+  else if (location.hash === '#starred') loadStarred();
+  else if (location.hash === '#scan') { $('#scanner-input').click(); }
+  else if (location.hash === '#new-doc') { createNewDocument(); }
 });
 
 (async function boot() {

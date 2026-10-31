@@ -30,6 +30,7 @@ const ai = require('./lib/ai_service');
 const { getPhotosTimeline } = require('./lib/photos');
 const { OCRStore, smartSearch } = require('./lib/smart_search');
 const { WatcherManager } = require('./lib/watchers');
+const { StarredManager } = require('./lib/starred');
 
 const DATA_DIR = path.resolve(process.env.RDRIVE_DATA || path.join(__dirname, 'data'));
 const PORT = Number(process.env.PORT || 8443);
@@ -57,6 +58,7 @@ const STATIC = {
   '/vendor/qrcode.js': ['vendor/qrcode.js', 'text/javascript; charset=utf-8'],
   '/style.css': ['style.css', 'text/css; charset=utf-8'],
   '/icon.svg': ['icon.svg', 'image/svg+xml'],
+  '/manifest.json': ['manifest.json', 'application/manifest+json; charset=utf-8'],
 };
 
 // Types that are safe to show inline in the browser. Everything else (notably
@@ -205,11 +207,12 @@ function defaultSheetPayload(title = 'Sheet 1') {
 }
 
 // options: { auth, files, github?, sync?, shares?, pairing?, secureCookies?, trustProxy? }
-function createHandler({ auth, files, github = null, sync = null, shares = null, pairing = null, ocrStore = null, watchers = null, secureCookies = USE_HTTPS, trustProxy = TRUST_PROXY }) {
+function createHandler({ auth, files, github = null, sync = null, shares = null, pairing = null, ocrStore = null, watchers = null, starred = null, secureCookies = USE_HTTPS, trustProxy = TRUST_PROXY }) {
   if (!shares && files && files.filesDir) shares = new Shares(path.dirname(files.filesDir));
   if (!pairing) pairing = new DevicePairing();
   if (!ocrStore && files && files.filesDir) ocrStore = new OCRStore(path.dirname(files.filesDir));
   if (!watchers && files && files.filesDir) watchers = new WatcherManager(path.dirname(files.filesDir), ocrStore);
+  if (!starred && files && files.filesDir) starred = new StarredManager(path.dirname(files.filesDir));
   const mcp = new McpServer({ auth, files, shares, onChanged: () => sync && sync.localChanged() });
   const secure = secureCookies ? '; Secure' : '';
   const sessionCookie = (token, maxAgeSec) => `${COOKIE}=${token}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${maxAgeSec}${secure}`;
@@ -612,7 +615,36 @@ function createHandler({ auth, files, github = null, sync = null, shares = null,
       }
 
       if (route === '/api/list' && req.method === 'GET') {
-        return sendJson(res, 200, { path: q.get('path') || '/', entries: await files.list(user, q.get('path')) });
+        return sendJson(res, 200, {
+          path: q.get('path') || '/',
+          entries: await files.list(user, q.get('path')),
+          starred: starred.list(user),
+        });
+      }
+      if (route === '/api/starred' && req.method === 'GET') {
+        const list = starred.list(user);
+        const items = [];
+        for (const p of list) {
+          try {
+            const norm = '/' + segments(p).join('/');
+            const parent = path.posix.dirname(norm);
+            const name = path.posix.basename(norm);
+            const entries = await files.list(user, parent);
+            const found = entries.find((e) => e.name === name);
+            if (found) {
+              items.push({ ...found, path: norm, starred: true });
+            } else {
+              items.push({ name, path: norm, type: 'folder', starred: true });
+            }
+          } catch {}
+        }
+        return sendJson(res, 200, { items, starred: list });
+      }
+      if (route === '/api/starred/toggle' && req.method === 'POST') {
+        const { path: p } = await readJsonBody(req);
+        if (!p) throw new HttpError(400, 'Path is required.');
+        const result = await starred.toggle(user, p);
+        return sendJson(res, 200, result);
       }
       if (route === '/api/search' && req.method === 'GET') {
         return sendJson(res, 200, { results: await smartSearch(files, ocrStore, user, q.get('q')) });
@@ -713,6 +745,7 @@ function createHandler({ auth, files, github = null, sync = null, shares = null,
       if (route === '/api/move' && req.method === 'POST') {
         const { from, to } = await readJsonBody(req);
         await files.move(user, from, to);
+        await starred.rename(user, from, to);
         changed();
         return sendJson(res, 200, { ok: true });
       }
@@ -725,7 +758,10 @@ function createHandler({ auth, files, github = null, sync = null, shares = null,
       if (route === '/api/delete' && req.method === 'POST') {
         const { paths } = await readJsonBody(req);
         if (!Array.isArray(paths) || !paths.length) throw new HttpError(400, 'Nothing to delete.');
-        for (const p of paths) await files.trash(user, p);
+        for (const p of paths) {
+          await files.trash(user, p);
+          await starred.remove(user, p);
+        }
         changed();
         return sendJson(res, 200, { ok: true });
       }

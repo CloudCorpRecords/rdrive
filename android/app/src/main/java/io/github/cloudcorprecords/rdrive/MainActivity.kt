@@ -50,12 +50,33 @@ class MainActivity : Activity() {
         }
         if (Prefs.serverUrl(this) == null) showSetup() else showDrive(savedInstanceState)
         handlePairIntent(intent)
+        handleShortcutIntent(intent)
     }
 
     override fun onNewIntent(intent: Intent?) {
         super.onNewIntent(intent)
         setIntent(intent)
         handlePairIntent(intent)
+        handleShortcutIntent(intent)
+    }
+
+    private fun handleShortcutIntent(intent: Intent?) {
+        val data = intent?.data ?: return
+        if (data.scheme != "rdrive" || data.host != "shortcut") return
+        val action = data.getQueryParameter("action") ?: return
+        intent.data = null
+        val targetHash = when (action) {
+            "scan" -> "#scan"
+            "photos" -> "#photos"
+            "starred" -> "#starred"
+            else -> "#/"
+        }
+        val server = Prefs.serverUrl(this) ?: return
+        if (web != null) {
+            web?.loadUrl("$server/$targetHash")
+        } else {
+            pendingPairUrl = "$server/$targetHash"
+        }
     }
 
     // rdrive://pair?url=<drive>&token=<one-time token>, from a "Connect a device" link. Any app or web
@@ -446,6 +467,19 @@ class MainActivity : Activity() {
 
         @JavascriptInterface
         fun changeAddress() = fromDrive { showSetup() }
+
+        @JavascriptInterface
+        fun vibrate(durationMs: Long) = fromDrive {
+            val ms = durationMs.coerceIn(5, 500)
+            if (Build.VERSION.SDK_INT >= 26) {
+                val vib = getSystemService(android.os.Vibrator::class.java)
+                vib?.vibrate(android.os.VibrationEffect.createOneShot(ms, android.os.VibrationEffect.DEFAULT_AMPLITUDE))
+            } else {
+                @Suppress("DEPRECATION")
+                val vib = getSystemService(android.os.Vibrator::class.java)
+                vib?.vibrate(ms)
+            }
+        }
     }
 
     private fun stopAutoUpload() {

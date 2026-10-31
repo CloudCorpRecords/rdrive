@@ -15,4 +15,7 @@
     <string name="menu_reload">Reload</string>
     <string name="menu_check_updates">Check for updates</string>
     <string name="notif_channel">Uploads</string>
+    <string name="shortcut_scan">Scan document</string>
+    <string name="shortcut_photos">Photos</string>
+    <string name="shortcut_starred">Starred</string>
 </resources>

@@ -992,3 +992,213 @@ input:not([type="checkbox"]):focus-visible { outline: 2px solid var(--accent); o
   font-weight: 600;
   margin-right: 6px;
 }
+
+/* ==================== Starred Files & Indicator ==================== */
+.star-btn {
+  background: none;
+  border: none;
+  padding: 4px;
+  cursor: pointer;
+  color: var(--muted);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  transition: color 0.15s ease, transform 0.15s ease;
+}
+.star-btn:hover {
+  color: #f59e0b;
+  transform: scale(1.15);
+}
+.star-btn.active {
+  color: #f59e0b;
+}
+.cell-name .star-btn {
+  margin-right: 6px;
+}
+
+/* ==================== File Details & QR Inspector ==================== */
+.details-dialog {
+  max-width: 480px;
+  width: 90vw;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 24px;
+  color: var(--text);
+}
+.details-hero {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 16px;
+}
+.details-icon {
+  width: 44px;
+  height: 44px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--surface-2);
+}
+.details-hero-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+}
+.details-hero-text strong {
+  display: block;
+  font-size: 16px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.details-hero-text span {
+  display: block;
+  word-break: break-all;
+}
+.details-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px;
+  margin-bottom: 20px;
+}
+.details-stat {
+  background: var(--surface-2);
+  padding: 10px 14px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+}
+.details-stat span {
+  display: block;
+  margin-bottom: 2px;
+}
+.details-stat strong {
+  font-size: 14px;
+}
+.details-qr-box {
+  text-align: center;
+  padding: 16px;
+  background: var(--surface-2);
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  margin-bottom: 20px;
+}
+.details-qrcode {
+  display: inline-block;
+  background: #ffffff;
+  padding: 12px;
+  border-radius: 8px;
+  margin-top: 10px;
+}
+.details-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+/* ==================== Persistent Audio Player Dock ==================== */
+.audio-dock {
+  position: fixed;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(580px, calc(100vw - 32px));
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.35);
+  padding: 12px 18px;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  z-index: 900;
+  backdrop-filter: blur(16px);
+  animation: slideUp 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+@media (max-width: 640px) {
+  .audio-dock {
+    bottom: 74px; /* above bottom navigation bar */
+    border-radius: 12px;
+    padding: 10px 14px;
+    gap: 10px;
+  }
+}
+@keyframes slideUp {
+  from { opacity: 0; transform: translate(-50%, 20px); }
+  to { opacity: 1; transform: translate(-50%, 0); }
+}
+.audio-dock-info {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1;
+  min-width: 0;
+}
+.audio-dock-icon {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.audio-dock-text {
+  min-width: 0;
+  overflow: hidden;
+}
+.audio-dock-text strong {
+  display: block;
+  font-size: 13px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.audio-dock-controls {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-shrink: 0;
+}
+.audio-dock-controls input[type="range"] {
+  width: 100px;
+  cursor: pointer;
+  accent-color: var(--accent);
+}
+@media (max-width: 480px) {
+  .audio-dock-controls input[type="range"] {
+    width: 60px;
+  }
+}
+
+/* ==================== Pull to Refresh Indicator ==================== */
+.pull-refresh {
+  position: absolute;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.pull-spinner {
+  width: 28px;
+  height: 28px;
+  border: 3px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+

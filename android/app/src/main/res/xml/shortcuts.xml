@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8"?>
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <shortcut
+        android:shortcutId="scan_doc"
+        android:enabled="true"
+        android:icon="@mipmap/ic_launcher"
+        android:shortcutShortLabel="@string/shortcut_scan"
+        android:shortcutLongLabel="@string/shortcut_scan">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:targetPackage="io.github.cloudcorprecords.rdrive"
+            android:targetClass="io.github.cloudcorprecords.rdrive.MainActivity"
+            android:data="rdrive://shortcut?action=scan" />
+    </shortcut>
+    <shortcut
+        android:shortcutId="photos"
+        android:enabled="true"
+        android:icon="@mipmap/ic_launcher"
+        android:shortcutShortLabel="@string/shortcut_photos"
+        android:shortcutLongLabel="@string/shortcut_photos">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:targetPackage="io.github.cloudcorprecords.rdrive"
+            android:targetClass="io.github.cloudcorprecords.rdrive.MainActivity"
+            android:data="rdrive://shortcut?action=photos" />
+    </shortcut>
+    <shortcut
+        android:shortcutId="starred"
+        android:enabled="true"
+        android:icon="@mipmap/ic_launcher"
+        android:shortcutShortLabel="@string/shortcut_starred"
+        android:shortcutLongLabel="@string/shortcut_starred">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:targetPackage="io.github.cloudcorprecords.rdrive"
+            android:targetClass="io.github.cloudcorprecords.rdrive.MainActivity"
+            android:data="rdrive://shortcut?action=starred" />
+    </shortcut>
+</shortcuts>
