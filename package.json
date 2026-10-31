@@ -40,7 +40,7 @@
     "node": ">=22.9"
   },
   "dependencies": {
-    "selfsigned": "^2.4.1"
+    "selfsigned": "^5.5.0"
   },
   "devDependencies": {
     "@xmldom/xmldom": "^0.9.12",
