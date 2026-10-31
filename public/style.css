@@ -252,6 +252,54 @@ dialog.account[open] { display: flex; flex-direction: column; }
   background: var(--text); color: var(--bg); padding: 10px 16px; border-radius: 8px; box-shadow: var(--shadow); max-width: calc(100vw - 32px);
 }
 
+/* RDocs Editor (shares the Sheets dialog chrome) */
+.doc-badge { background: #e8f0fe; color: #1a56c4; margin-left: 0; }
+.doc-toolbar { flex-wrap: wrap; row-gap: 4px; }
+.doc-scroll { flex: 1; min-height: 0; overflow: auto; background: var(--surface-2); padding: 24px 16px 48px; }
+.doc-page {
+  max-width: 816px; min-height: 1056px; margin: 0 auto; padding: 72px 80px;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 4px; box-shadow: 0 1px 3px rgba(15, 23, 42, 0.08);
+  font: 16px/1.6 Georgia, "Times New Roman", serif; color: var(--text); outline: none; overflow-wrap: break-word;
+}
+.doc-page:focus-visible { outline: none; }
+.doc-page > :first-child { margin-top: 0; }
+.doc-page h1, .doc-page h2, .doc-page h3, .doc-page h4 { font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; line-height: 1.25; margin: 1.2em 0 0.4em; }
+.doc-page h1 { font-size: 2em; }
+.doc-page h2 { font-size: 1.5em; }
+.doc-page h3 { font-size: 1.2em; }
+.doc-page p { margin: 0 0 0.75em; }
+.doc-page a { color: var(--accent); }
+.doc-page blockquote { margin: 0 0 0.75em; padding: 2px 0 2px 16px; border-left: 3px solid var(--border); color: var(--muted); }
+.doc-page pre { background: var(--surface-2); padding: 12px 14px; border-radius: 6px; overflow-x: auto; font: 13.5px/1.5 ui-monospace, Consolas, monospace; white-space: pre-wrap; }
+.doc-page code { font: 0.9em ui-monospace, Consolas, monospace; background: var(--surface-2); padding: 1px 4px; border-radius: 4px; }
+.doc-page pre code { background: none; padding: 0; }
+.doc-page table { border-collapse: collapse; width: 100%; margin: 0 0 0.75em; }
+.doc-page td, .doc-page th { border: 1px solid var(--border); padding: 6px 10px; vertical-align: top; min-width: 40px; }
+.doc-page th { background: var(--surface-2); text-align: left; }
+.doc-page img { max-width: 100%; height: auto; }
+.doc-page hr { border: 0; border-top: 1px solid var(--border); margin: 1.5em 0; }
+.doc-page ul, .doc-page ol { padding-left: 1.6em; margin: 0 0 0.75em; }
+.doc-banner { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 14px; background: var(--accent-soft); border-bottom: 1px solid var(--border); font-size: 13.5px; }
+.doc-modal .sheet-bottom { display: flex; justify-content: space-between; gap: 12px; padding: 6px 14px; border-top: 1px solid var(--border); background: var(--surface); }
+@media (max-width: 700px) {
+  .sheet-modal .sheet-top { flex-wrap: wrap; row-gap: 6px; }
+  .sheet-modal .sheet-title-wrap { flex: 1 1 100%; }
+  .sheet-modal .sheet-top-actions { flex: 1 1 100%; justify-content: flex-end; }
+  .doc-scroll { padding: 0; }
+  .doc-page { padding: 24px 18px; min-height: 100%; border: 0; border-radius: 0; box-shadow: none; }
+  .doc-modal .sheet-bottom span:last-child { display: none; }
+}
+/* PDF / Print: only the page itself, on white paper. */
+@media print {
+  body.printing-doc > :not(#doc-dialog) { display: none !important; }
+  body.printing-doc { background: #fff; }
+  body.printing-doc #doc-dialog { position: static; display: block; width: auto; height: auto; max-width: none; max-height: none; border: 0; box-shadow: none; background: #fff; overflow: visible; }
+  body.printing-doc #doc-dialog::backdrop { display: none; }
+  body.printing-doc .doc-chrome { display: none !important; }
+  body.printing-doc .doc-scroll { padding: 0; background: #fff; overflow: visible; }
+  body.printing-doc .doc-page { max-width: none; min-height: 0; padding: 0; border: 0; box-shadow: none; color: #000; background: #fff; }
+}
+
 /* RDrive Sheets Editor */
 dialog.sheet-modal {
   width: min(1400px, calc(100vw - 16px));

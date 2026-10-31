@@ -1,6 +1,6 @@
 {
   "name": "rdrive",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Self-hosted, open source file drive. Run it on one machine, reach it securely from your other devices.",
   "main": "server.js",
   "scripts": {
@@ -15,9 +15,16 @@
     "mcp": "node mcp.js",
     "deluser": "node server.js deluser",
     "users": "node server.js users",
-    "test": "node --test test/*.test.js"
+    "test": "node --test test/*.test.js",
+    "vendor": "node scripts/vendor.js"
   },
-  "keywords": ["drive", "self-hosted", "file-sharing", "google-drive-alternative", "sso"],
+  "keywords": [
+    "drive",
+    "self-hosted",
+    "file-sharing",
+    "google-drive-alternative",
+    "sso"
+  ],
   "homepage": "https://github.com/CloudCorpRecords/rdrive#readme",
   "repository": {
     "type": "git",
@@ -33,5 +40,13 @@
   },
   "dependencies": {
     "selfsigned": "^2.4.1"
+  },
+  "devDependencies": {
+    "@xmldom/xmldom": "^0.9.12",
+    "docx": "^9.15.0",
+    "exceljs": "^4.4.0",
+    "jszip": "^3.10.2",
+    "linkedom": "^0.18.14",
+    "mammoth": "^1.13.0"
   }
 }

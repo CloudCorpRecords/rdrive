@@ -681,7 +681,10 @@
 
   // ---------- Editor UI Controller ----------
 
-  function openSheetModal({ name, path: filePath, readOnly = false, loadContent, saveContent, onSaved }) {
+  // loadWorkbook (optional): async () => workbook, for files converted before opening (e.g. .xlsx).
+  // saveCopy (optional): async (fileName, blob) => savedName, for "Save a copy in this folder".
+  // banner (optional): { text, actionLabel, onAction } shown above the grid.
+  function openSheetModal({ name, path: filePath, readOnly = false, loadContent, loadWorkbook, saveContent, saveCopy, banner, onSaved }) {
     const dlg = document.getElementById('sheet-dialog');
     const titleEl = document.getElementById('sheet-title');
     const statusEl = document.getElementById('sheet-save-status');
@@ -714,6 +717,25 @@
     formulaInput.readOnly = readOnly;
     document.getElementById('sheet-toolbar-edit').hidden = readOnly;
     document.getElementById('sheet-add-tab').hidden = readOnly || isDelimited;
+
+    const bannerEl = document.getElementById('sheet-banner');
+    bannerEl.hidden = !banner;
+    if (banner) {
+      document.getElementById('sheet-banner-text').textContent = banner.text;
+      const btn = document.getElementById('sheet-banner-action');
+      btn.hidden = !banner.actionLabel;
+      btn.textContent = banner.actionLabel || '';
+      btn.onclick = async () => {
+        btn.disabled = true;
+        try {
+          await banner.onAction();
+        } finally {
+          btn.disabled = false;
+        }
+      };
+    }
+    const exportSelect = document.getElementById('sheet-export');
+    exportSelect.querySelector('optgroup[data-copy-group]').hidden = !saveCopy;
 
     function curSheet() {
       return workbook.sheets[workbook.activeSheet || 0];
@@ -1377,19 +1399,48 @@
       renderAll();
     });
 
-    bindClick('sheet-export-csv', () => {
-      if (!workbook) return;
-      const csv = serializeDelimited(curSheet(), ',');
-      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = name.replace(/\.(rsheet|csv|tsv)$/i, '') + '.csv';
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      setTimeout(() => URL.revokeObjectURL(url), 5000);
-    });
+    // Export: Excel / OpenDocument (all tabs, formulas and formatting) or CSV (current tab, values).
+    exportSelect.value = '';
+    exportSelect.onchange = async () => {
+      const choice = exportSelect.value;
+      exportSelect.value = '';
+      if (!choice || !workbook) return;
+      commitFormulaBar();
+      const [mode, kind] = choice.split(':');
+      const fileName = name.replace(/\.[^.]+$/, '') + '.' + kind;
+      const interop = window.RDriveInterop;
+      statusEl.textContent = `Preparing .${kind}…`;
+      try {
+        let blob;
+        if (kind === 'csv') {
+          blob = new Blob([serializeDelimited(curSheet(), ',')], { type: 'text/csv;charset=utf-8' });
+        } else if (kind === 'xlsx') {
+          const data = await interop.workbookToXlsx(workbook, { ...(await interop.load('ExcelJS')), evaluate: evaluateWorkbook });
+          blob = new Blob([data], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+        } else {
+          const data = await interop.workbookToOds(workbook, { ...(await interop.load('JSZip')), evaluate: evaluateWorkbook });
+          blob = new Blob([data], { type: 'application/vnd.oasis.opendocument.spreadsheet' });
+        }
+        if (mode === 'dl') {
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = fileName;
+          document.body.appendChild(a);
+          a.click();
+          a.remove();
+          setTimeout(() => URL.revokeObjectURL(url), 10000);
+          statusEl.textContent = `Downloaded ${fileName}`;
+        } else {
+          const saved = await saveCopy(fileName, blob);
+          statusEl.textContent = `Saved a copy: ${saved}`;
+          if (window.rdriveToast) window.rdriveToast(`Saved "${saved}" in this folder.`);
+        }
+      } catch (err) {
+        statusEl.textContent = 'Export failed';
+        if (window.rdriveToast) window.rdriveToast(err.message || 'Could not export the spreadsheet.');
+      }
+    };
 
     bindClick('sheet-save', () => {
       commitFormulaBar();
@@ -1429,9 +1480,11 @@
     // ---------- Load Workbook ----------
     statusEl.textContent = 'Loading…';
     if (!dlg.open) dlg.showModal();
-    loadContent()
+    (loadWorkbook ? loadWorkbook().then((wb) => ({ wb })) : loadContent())
       .then((rawText) => {
-        if (isDelimited) {
+        if (rawText && rawText.wb) {
+          workbook = rawText.wb;
+        } else if (isDelimited) {
           workbook = delimitedToWorkbook(rawText, name, sep);
         } else {
           try {

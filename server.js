@@ -19,7 +19,7 @@ const { Files, HttpError, segments } = require('./lib/files');
 const { GitHubAuth, lookupGithubUser } = require('./lib/github');
 const { loadOrCreateCert, lanAddresses } = require('./lib/tls');
 const { Sync } = require('./lib/sync');
-const { Shares, isSheetName } = require('./lib/shares');
+const { Shares, isSheetName, isDocName, isEditableName } = require('./lib/shares');
 const { streamFolderAsZip } = require('./lib/zip');
 const { handleWebdav } = require('./lib/webdav');
 const { McpServer } = require('./lib/mcp');
@@ -40,6 +40,13 @@ const STATIC = {
   '/': ['index.html', 'text/html; charset=utf-8'],
   '/app.js': ['app.js', 'text/javascript; charset=utf-8'],
   '/sheet.js': ['sheet.js', 'text/javascript; charset=utf-8'],
+  '/docs.js': ['docs.js', 'text/javascript; charset=utf-8'],
+  '/interop.js': ['interop.js', 'text/javascript; charset=utf-8'],
+  // Office/OpenDocument format libraries, loaded only when importing or exporting (see scripts/vendor.js).
+  '/vendor/exceljs.min.js': ['vendor/exceljs.min.js', 'text/javascript; charset=utf-8'],
+  '/vendor/jszip.min.js': ['vendor/jszip.min.js', 'text/javascript; charset=utf-8'],
+  '/vendor/mammoth.browser.min.js': ['vendor/mammoth.browser.min.js', 'text/javascript; charset=utf-8'],
+  '/vendor/docx.iife.js': ['vendor/docx.iife.js', 'text/javascript; charset=utf-8'],
   '/style.css': ['style.css', 'text/css; charset=utf-8'],
   '/icon.svg': ['icon.svg', 'image/svg+xml'],
 };
@@ -55,6 +62,7 @@ const INLINE_TYPES = {
   '.txt': 'text/plain; charset=utf-8', '.md': 'text/plain; charset=utf-8', '.log': 'text/plain; charset=utf-8',
   '.csv': 'text/plain; charset=utf-8', '.tsv': 'text/plain; charset=utf-8',
   '.json': 'text/plain; charset=utf-8', '.rsheet': 'application/json; charset=utf-8',
+  '.rdoc': 'application/json; charset=utf-8',
 };
 
 function securityHeaders(res) {
@@ -455,6 +463,7 @@ function createHandler({ auth, files, github = null, sync = null, shares = null,
             size: isDir ? null : st.size,
             modified: st.mtime.toISOString(),
             isSheet: !isDir && isSheetName(baseName),
+            isDoc: !isDir && isDocName(baseName),
             allowEdit: !isDir && !!s.allowEdit,
             expires: s.expires ? new Date(s.expires).toISOString() : null,
             sub: '/' + subSegs.join('/'),
@@ -486,7 +495,7 @@ function createHandler({ auth, files, github = null, sync = null, shares = null,
         }
 
         if (route === '/api/public/share/save' && req.method === 'PUT') {
-          if (!s.allowEdit || !isSheetName(s.path)) throw new HttpError(403, 'Editing is not enabled for this share link.');
+          if (!s.allowEdit || !isEditableName(s.path)) throw new HttpError(403, 'Editing is not enabled for this share link.');
           const segs = segments(s.path);
           const fileName = segs.pop();
           const dirPath = '/' + segs.join('/');
@@ -545,6 +554,16 @@ function createHandler({ auth, files, github = null, sync = null, shares = null,
         const normDir = '/' + segments(dirPath).join('/');
         const fullClientPath = (normDir === '/' ? '' : normDir) + '/' + savedName;
         return sendJson(res, 200, { name: savedName, path: fullClientPath });
+      }
+      if (route === '/api/doc/create' && req.method === 'POST') {
+        const { path: dirPath = '/', name = 'Untitled document.rdoc' } = await readJsonBody(req);
+        let cleanName = String(name || 'Untitled document').trim();
+        if (path.extname(cleanName).toLowerCase() !== '.rdoc') cleanName += '.rdoc';
+        const initial = Buffer.from(JSON.stringify({ format: 'rdrive-doc', version: 1, html: '<p><br></p>' }, null, 2), 'utf8');
+        const savedName = await files.writeBuffer(user, dirPath, cleanName, initial, { overwrite: false });
+        changed();
+        const normDir = '/' + segments(dirPath).join('/');
+        return sendJson(res, 200, { name: savedName, path: (normDir === '/' ? '' : normDir) + '/' + savedName });
       }
       if (route === '/api/mkdir' && req.method === 'POST') {
         const { path: p, name } = await readJsonBody(req);
