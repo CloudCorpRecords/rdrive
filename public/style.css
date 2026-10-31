@@ -1202,3 +1202,163 @@ input:not([type="checkbox"]):focus-visible { outline: 2px solid var(--accent); o
   to { transform: rotate(360deg); }
 }
 
+/* ==================== 1. Voice Memo Recorder ==================== */
+.voice-memo-dialog {
+  max-width: 440px;
+  width: 90vw;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 24px;
+  color: var(--text);
+  text-align: center;
+}
+.voice-waveform-wrap {
+  background: var(--surface-2);
+  border-radius: 12px;
+  padding: 12px;
+  margin: 16px 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border);
+}
+.voice-waveform-wrap canvas {
+  width: 100%;
+  max-width: 340px;
+  height: 90px;
+}
+.voice-timer {
+  font-size: 32px;
+  font-weight: 700;
+  font-family: var(--mono);
+  color: var(--accent);
+  margin-bottom: 20px;
+}
+.voice-controls {
+  display: flex;
+  gap: 10px;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
+/* ==================== 2. Storage Analytics & Duplicate Cleaner ==================== */
+.storage-dialog {
+  max-width: 680px;
+  width: 94vw;
+}
+.storage-summary-bar {
+  height: 20px;
+  border-radius: 10px;
+  background: var(--surface-2);
+  display: flex;
+  overflow: hidden;
+  margin-bottom: 12px;
+  border: 1px solid var(--border);
+}
+.storage-bar-seg {
+  height: 100%;
+  transition: width 0.3s ease;
+}
+.storage-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 18px;
+  margin-bottom: 20px;
+  font-size: 12px;
+}
+.storage-legend-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.storage-legend-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+}
+.storage-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: 280px;
+  overflow-y: auto;
+}
+.duplicate-cluster {
+  background: var(--surface-2);
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  padding: 10px 14px;
+}
+.duplicate-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 13px;
+  margin-bottom: 6px;
+}
+.duplicate-file-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+  color: var(--muted);
+  padding: 2px 0;
+}
+
+/* ==================== 3. Code & Config Editor ==================== */
+.code-editor-dialog {
+  max-width: 920px;
+  width: 95vw;
+  height: 85vh;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  display: flex;
+  flex-direction: column;
+  padding: 0;
+  overflow: hidden;
+}
+.code-editor-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 20px;
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--border);
+}
+.code-editor-title-wrap {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.code-editor-actions {
+  display: flex;
+  gap: 8px;
+}
+.code-editor-wrap {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+  background: #0d1210;
+}
+.code-editor-area {
+  flex: 1;
+  width: 100%;
+  height: 100%;
+  border: none;
+  background: transparent;
+  color: #d1fae5;
+  font-family: 'SF Mono', Consolas, Menlo, Monaco, monospace;
+  font-size: 14px;
+  line-height: 1.6;
+  padding: 16px 20px;
+  resize: none;
+  outline: none;
+  tab-size: 2;
+  white-space: pre;
+  overflow: auto;
+}
+
+

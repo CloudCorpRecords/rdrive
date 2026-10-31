@@ -106,9 +106,10 @@
         <input id="search-input" type="search" placeholder="Search your drive" aria-label="Search files" autocomplete="off">
       </div>
       <div class="topbar-right">
-        <span id="usage" class="muted small"></span>
+        <span id="usage" class="chip chip-btn" title="Storage analytics &amp; cleaner"></span>
         <button class="btn btn-ghost small" id="photos-btn" title="Photos &amp; media timeline">Photos</button>
         <button class="btn btn-ghost small" id="starred-btn" title="Starred files">Starred</button>
+        <button class="btn btn-ghost small" id="vault-btn" title="Encrypted Private Vault">Vault</button>
         <button class="btn btn-ghost small" id="trash-btn" title="View deleted items">Trash</button>
         <button id="whoami" class="chip chip-btn" title="Account and devices"></button>
         <button class="btn btn-ghost" id="logout">Sign out</button>
@@ -213,6 +214,7 @@
   <div id="new-menu" class="menu" role="menu" hidden>
     <div class="menu-title"><span>Add to this folder</span></div>
     <button role="menuitem" data-new="scan"><span data-icon="camera"></span>Scan document</button>
+    <button role="menuitem" data-new="voice"><span data-icon="media"></span>Voice memo</button>
     <button role="menuitem" data-new="doc"><span data-icon="doc"></span>Document</button>
     <button role="menuitem" data-new="sheet"><span data-icon="sheet"></span>Spreadsheet</button>
     <button role="menuitem" data-new="folder"><span data-icon="folder"></span>Folder</button>
@@ -279,6 +281,15 @@
             </select>
           </label>
           <label>Optional password<input name="password" type="password" placeholder="Leave blank for anyone with the link" autocomplete="new-password"></label>
+          <label>Download limit (optional)
+            <select name="maxDownloads" class="select-input">
+              <option value="0" selected>Unlimited downloads</option>
+              <option value="1">Single-use (1 download)</option>
+              <option value="3">3 downloads</option>
+              <option value="10">10 downloads</option>
+              <option value="50">50 downloads</option>
+            </select>
+          </label>
           <label id="share-edit-row" class="check-row" hidden>
             <input type="checkbox" name="allowEdit"> Allow anyone with the link to edit
           </label>
@@ -825,6 +836,99 @@
     </div>
     <audio id="audio-dock-element" preload="metadata"></audio>
   </div>
+
+  <!-- 1. Encrypted Private Vault ("Secure Folder") Dialog -->
+  <dialog id="vault-dialog" class="account">
+    <div class="preview-head">
+      <strong>🔒 Private Vault</strong>
+      <button class="btn btn-ghost" id="vault-close">Close</button>
+    </div>
+    <div class="account-body">
+      <div id="vault-setup-view" hidden>
+        <p class="muted">Protect your private files with a dedicated master PIN. Files inside <code class="mono">/Vault</code> will stay encrypted and invisible until unlocked.</p>
+        <form id="vault-setup-form" class="password-form">
+          <label>Create Vault PIN (4-32 digits or chars)<input id="vault-setup-pin" type="password" autocomplete="new-password" minlength="4" required></label>
+          <label>Confirm PIN<input id="vault-setup-confirm" type="password" autocomplete="new-password" minlength="4" required></label>
+          <p id="vault-setup-error" class="error"></p>
+          <button class="btn btn-primary" type="submit">Create Vault</button>
+        </form>
+      </div>
+      <div id="vault-unlock-view" hidden>
+        <p class="muted">Enter your Vault PIN to unlock your private documents and photos.</p>
+        <form id="vault-unlock-form" class="password-form">
+          <label>Vault PIN<input id="vault-unlock-pin" type="password" autocomplete="current-password" autofocus required></label>
+          <p id="vault-unlock-error" class="error"></p>
+          <div class="row-actions">
+            <button class="btn btn-primary" type="submit">Unlock Vault</button>
+            <button class="btn btn-ghost" id="vault-lock-btn" type="button">Lock Now</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </dialog>
+
+  <!-- 2. Voice Memo & Audio Recorder Dialog -->
+  <dialog id="voice-memo-dialog" class="voice-memo-dialog">
+    <div class="dialog-head">
+      <strong>🎙️ Record Voice Memo</strong>
+      <button class="btn small btn-ghost" id="voice-memo-close" type="button">✕</button>
+    </div>
+    <div class="voice-memo-body">
+      <div class="voice-waveform-wrap">
+        <canvas id="voice-memo-canvas" width="340" height="90"></canvas>
+      </div>
+      <div class="voice-timer" id="voice-memo-timer">00:00</div>
+      <div class="voice-controls">
+        <button class="btn btn-danger voice-record-btn" id="voice-record-btn" type="button">Start Recording</button>
+        <button class="btn btn-primary" id="voice-save-btn" type="button" hidden>Save to Drive</button>
+        <button class="btn btn-ghost" id="voice-discard-btn" type="button" hidden>Discard</button>
+      </div>
+    </div>
+  </dialog>
+
+  <!-- 3. Storage Breakdown & Duplicate Cleaner Dialog -->
+  <dialog id="storage-dialog" class="account storage-dialog">
+    <div class="preview-head">
+      <strong>🧹 Storage Analytics &amp; Cleaner</strong>
+      <button class="btn btn-ghost" id="storage-close">Close</button>
+    </div>
+    <div class="account-body">
+      <section>
+        <div class="storage-summary-bar" id="storage-bar"></div>
+        <div class="storage-legend" id="storage-legend"></div>
+      </section>
+      <section>
+        <div class="section-head">
+          <h3>Duplicate Files</h3>
+          <button class="btn small btn-danger" id="clean-duplicates-btn" hidden>Clean All Duplicates</button>
+        </div>
+        <div id="storage-duplicates-list" class="storage-list">
+          <p class="muted small">Scanning for duplicates…</p>
+        </div>
+      </section>
+      <section>
+        <h3>Large Files (&gt; 10 MB)</h3>
+        <div id="storage-large-list" class="storage-list"></div>
+      </section>
+    </div>
+  </dialog>
+
+  <!-- 4. Quick Code & Config Editor Dialog -->
+  <dialog id="code-editor-dialog" class="code-editor-dialog">
+    <div class="code-editor-head">
+      <div class="code-editor-title-wrap">
+        <strong id="code-editor-title">filename.js</strong>
+        <span class="muted small" id="code-editor-status">Ready</span>
+      </div>
+      <div class="code-editor-actions">
+        <button class="btn small btn-primary" id="code-editor-save" type="button">Save (Ctrl+S)</button>
+        <button class="btn small btn-ghost" id="code-editor-close" type="button">Close</button>
+      </div>
+    </div>
+    <div class="code-editor-wrap">
+      <textarea id="code-editor-content" spellcheck="false" class="code-editor-area"></textarea>
+    </div>
+  </dialog>
 
   <div id="toast" class="toast" role="status" hidden></div>
 </body>

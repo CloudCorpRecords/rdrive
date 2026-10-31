@@ -9,6 +9,7 @@ const state = {
   searchQuery: '',
   entries: [],
   starred: new Set(),
+  vaultToken: null,
   selected: new Set(),
   menuTarget: null,
 };
@@ -17,6 +18,7 @@ const state = {
 
 async function api(method, url, body) {
   const opts = { method, headers: { 'X-Rdrive': '1' }, credentials: 'same-origin' };
+  if (state.vaultToken) opts.headers['X-Rdrive-Vault'] = state.vaultToken;
   if (body !== undefined) {
     opts.headers['Content-Type'] = 'application/json';
     opts.body = JSON.stringify(body);
@@ -166,6 +168,7 @@ const UI_ICONS = {
   cloud: 'M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z',
   star: 'M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z',
   info: 'M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20zM12 16v-4M12 8h.01',
+  lock: 'M17 11V7a5 5 0 0 0-10 0v4H5a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7a2 2 0 0 0-2-2h-2zM9 7a3 3 0 0 1 6 0v4H9V7z',
   backup: 'M12 18v-8m-4 4 4-4 4 4M20 16.58A5 5 0 0 0 18 7h-1.26A8 8 0 1 0 4 15.25',
   phone: 'M7 4.5h10a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2v-11a2 2 0 0 1 2-2zM11 17.5h2',
 };
@@ -868,7 +871,13 @@ document.addEventListener('keydown', (e) => {
 
 function openEntry(entry, baseDir = state.path) {
   const p = entry.path || joinPath(baseDir, entry.name);
+  if (entry.isVault || (entry.name === 'Vault' && entry.locked)) {
+    return openVaultDialog();
+  }
   if (entry.type === 'folder') return navigate(p);
+  const ext = entry.name.split('.').pop().toLowerCase();
+  const CODE_EXTS = ['js', 'json', 'py', 'sh', 'css', 'html', 'sql', 'yml', 'yaml', 'env', 'txt', 'md', 'toml', 'ts', 'jsx', 'tsx', 'xml', 'log', 'conf', 'ini'];
+  if (CODE_EXTS.includes(ext)) return openCodeEditor(entry.name, p);
   const kind = previewKind(entry.name);
   if (kind === 'sheet') return openSpreadsheet(entry.name, p);
   if (kind === 'doc') return openDocument(entry.name, p);
@@ -1302,6 +1311,14 @@ async function renderShareList() {
       s.hasPassword ? 'Password protected' : 'Public link',
       s.allowEdit ? 'Anyone with the link can edit' : 'View / download',
     ];
+    if (s.maxDownloads > 0) {
+      parts.push(`${s.downloads || 0}/${s.maxDownloads} downloads`);
+    } else if (s.downloads) {
+      parts.push(`${s.downloads} downloads`);
+    }
+    if (s.views) {
+      parts.push(`${s.views} views`);
+    }
     meta.textContent = parts.join(' · ');
     info.append(title, meta);
     const actions = document.createElement('div');
@@ -1352,6 +1369,7 @@ $('#share-form').addEventListener('submit', async (e) => {
       expiresInHours: Number(f.expiresInHours.value),
       password: f.password.value,
       allowEdit: f.allowEdit.checked,
+      maxDownloads: Number(f.maxDownloads ? f.maxDownloads.value : 0),
     });
     f.password.value = '';
     const fullUrl = location.origin + share.url;
@@ -1425,6 +1443,7 @@ $('#new-menu').addEventListener('click', (e) => {
   if (what === 'folder') $('#new-folder').click();
   if (what === 'upload') $('#file-input').click();
   if (what === 'camera') $('#camera-input').click();
+  if (what === 'voice') openVoiceMemoDialog();
   if (what === 'zip') download(state.path, true);
 });
 
@@ -2829,6 +2848,493 @@ window.addEventListener('hashchange', () => {
   else if (location.hash === '#scan') { $('#scanner-input').click(); }
   else if (location.hash === '#new-doc') { createNewDocument(); }
 });
+
+// ==================== Encrypted Private Vault ====================
+
+async function openVaultDialog() {
+  try {
+    const status = await api('GET', '/api/vault/status');
+    const dialog = $('#vault-dialog');
+    if (!status.hasPin) {
+      $('#vault-setup-view').hidden = false;
+      $('#vault-unlock-view').hidden = true;
+      $('#vault-setup-pin').value = '';
+      $('#vault-setup-confirm').value = '';
+      $('#vault-setup-error').textContent = '';
+      dialog.showModal();
+    } else if (status.unlocked || state.vaultToken) {
+      if (state.path !== '/Vault') {
+        navigate('/Vault');
+      } else {
+        $('#vault-setup-view').hidden = true;
+        $('#vault-unlock-view').hidden = false;
+        $('#vault-lock-btn').hidden = false;
+        $('#vault-unlock-error').textContent = '';
+        dialog.showModal();
+      }
+    } else {
+      $('#vault-setup-view').hidden = true;
+      $('#vault-unlock-view').hidden = false;
+      $('#vault-unlock-pin').value = '';
+      $('#vault-unlock-error').textContent = '';
+      $('#vault-lock-btn').hidden = true;
+      dialog.showModal();
+    }
+  } catch (err) {
+    toast(err.message || 'Vault unavailable');
+  }
+}
+
+$('#vault-setup-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const p1 = $('#vault-setup-pin').value;
+  const p2 = $('#vault-setup-confirm').value;
+  if (p1 !== p2) {
+    $('#vault-setup-error').textContent = 'PINs do not match.';
+    return;
+  }
+  if (p1.length < 4) {
+    $('#vault-setup-error').textContent = 'PIN must be at least 4 characters.';
+    return;
+  }
+  try {
+    const res = await api('POST', '/api/vault/setup', { pin: p1 });
+    state.vaultToken = res.vaultToken || res.token;
+    $('#vault-dialog').close();
+    toast('Vault created and unlocked!');
+    navigate('/Vault');
+  } catch (err) {
+    $('#vault-setup-error').textContent = err.message;
+  }
+});
+
+$('#vault-unlock-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const pin = $('#vault-unlock-pin').value;
+  try {
+    const res = await api('POST', '/api/vault/unlock', { pin });
+    state.vaultToken = res.vaultToken || res.token;
+    $('#vault-dialog').close();
+    toast('Vault unlocked!');
+    navigate('/Vault');
+  } catch (err) {
+    $('#vault-unlock-error').textContent = err.message;
+  }
+});
+
+$('#vault-lock-btn').addEventListener('click', async () => {
+  try {
+    await api('POST', '/api/vault/lock');
+    state.vaultToken = null;
+    $('#vault-dialog').close();
+    toast('Vault locked.');
+    if (state.path.startsWith('/Vault')) {
+      navigate('/');
+    } else {
+      load();
+    }
+  } catch (err) {
+    toast(err.message);
+  }
+});
+
+$('#vault-close').addEventListener('click', () => $('#vault-dialog').close());
+$('#vault-btn').addEventListener('click', () => openVaultDialog());
+
+
+// ==================== Voice Memo & Audio Recorder ====================
+
+let voiceMediaRecorder = null;
+let voiceAudioChunks = [];
+let voiceAudioContext = null;
+let voiceAnalyser = null;
+let voiceAnimId = null;
+let voiceTimerInterval = null;
+let voiceRecordStartTime = 0;
+let recordedVoiceBlob = null;
+
+function formatRecordTime(seconds) {
+  const m = Math.floor(seconds / 60).toString().padStart(2, '0');
+  const s = (seconds % 60).toString().padStart(2, '0');
+  return `${m}:${s}`;
+}
+
+function drawIdleWaveform(canvas) {
+  const ctx = canvas.getContext('2d');
+  const w = canvas.width;
+  const h = canvas.height;
+  ctx.clearRect(0, 0, w, h);
+  ctx.beginPath();
+  ctx.moveTo(0, h / 2);
+  for (let x = 0; x < w; x++) {
+    const y = h / 2 + Math.sin(x * 0.05) * 4;
+    ctx.lineTo(x, y);
+  }
+  ctx.strokeStyle = 'rgba(13, 148, 136, 0.4)';
+  ctx.lineWidth = 2;
+  ctx.stroke();
+}
+
+function openVoiceMemoDialog() {
+  const dlg = $('#voice-memo-dialog');
+  const canvas = $('#voice-memo-canvas');
+  $('#voice-memo-timer').textContent = '00:00';
+  $('#voice-record-btn').textContent = 'Start Recording';
+  $('#voice-record-btn').classList.remove('recording');
+  $('#voice-save-btn').hidden = true;
+  $('#voice-discard-btn').hidden = true;
+  recordedVoiceBlob = null;
+  drawIdleWaveform(canvas);
+  dlg.showModal();
+}
+
+async function startVoiceRecording() {
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    voiceAudioChunks = [];
+    voiceMediaRecorder = new MediaRecorder(stream);
+    voiceMediaRecorder.ondataavailable = (e) => {
+      if (e.data && e.data.size > 0) voiceAudioChunks.push(e.data);
+    };
+
+    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+    voiceAudioContext = new AudioCtx();
+    const source = voiceAudioContext.createMediaStreamSource(stream);
+    voiceAnalyser = voiceAudioContext.createAnalyser();
+    voiceAnalyser.fftSize = 256;
+    source.connect(voiceAnalyser);
+
+    const canvas = $('#voice-memo-canvas');
+    const ctx = canvas.getContext('2d');
+    const bufferLength = voiceAnalyser.frequencyBinCount;
+    const dataArray = new Uint8Array(bufferLength);
+
+    function drawWave() {
+      voiceAnimId = requestAnimationFrame(drawWave);
+      voiceAnalyser.getByteTimeDomainData(dataArray);
+
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.lineWidth = 3;
+      ctx.strokeStyle = '#0d9488';
+      ctx.beginPath();
+
+      const sliceWidth = (canvas.width * 1.0) / bufferLength;
+      let x = 0;
+      for (let i = 0; i < bufferLength; i++) {
+        const v = dataArray[i] / 128.0;
+        const y = (v * canvas.height) / 2;
+        if (i === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+        x += sliceWidth;
+      }
+      ctx.lineTo(canvas.width, canvas.height / 2);
+      ctx.stroke();
+    }
+    drawWave();
+
+    voiceRecordStartTime = Date.now();
+    voiceTimerInterval = setInterval(() => {
+      const elapsed = Math.floor((Date.now() - voiceRecordStartTime) / 1000);
+      $('#voice-memo-timer').textContent = formatRecordTime(elapsed);
+    }, 500);
+
+    voiceMediaRecorder.start();
+    $('#voice-record-btn').textContent = 'Stop Recording';
+    $('#voice-record-btn').classList.add('recording');
+    $('#voice-save-btn').hidden = true;
+    $('#voice-discard-btn').hidden = true;
+  } catch (err) {
+    toast(`Microphone error: ${err.message}`);
+  }
+}
+
+function stopVoiceRecording() {
+  if (!voiceMediaRecorder) return;
+  voiceMediaRecorder.onstop = () => {
+    recordedVoiceBlob = new Blob(voiceAudioChunks, { type: 'audio/webm' });
+    $('#voice-record-btn').textContent = 'Record Again';
+    $('#voice-record-btn').classList.remove('recording');
+    $('#voice-save-btn').hidden = false;
+    $('#voice-discard-btn').hidden = false;
+  };
+  voiceMediaRecorder.stop();
+  if (voiceMediaRecorder.stream) {
+    voiceMediaRecorder.stream.getTracks().forEach((t) => t.stop());
+  }
+  if (voiceTimerInterval) clearInterval(voiceTimerInterval);
+  if (voiceAnimId) cancelAnimationFrame(voiceAnimId);
+  if (voiceAudioContext && voiceAudioContext.state !== 'closed') {
+    voiceAudioContext.close().catch(() => {});
+  }
+}
+
+$('#voice-record-btn').addEventListener('click', () => {
+  if (voiceMediaRecorder && voiceMediaRecorder.state === 'recording') {
+    stopVoiceRecording();
+  } else {
+    startVoiceRecording();
+  }
+});
+
+$('#voice-save-btn').addEventListener('click', async () => {
+  if (!recordedVoiceBlob) return;
+  const now = new Date();
+  const pad = (n) => String(n).padStart(2, '0');
+  const dStr = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}_${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
+  const filename = `Voice_${dStr}.webm`;
+  const p = `/Voice Memos/${filename}`;
+
+  const fd = new FormData();
+  fd.append('file', recordedVoiceBlob, filename);
+  fd.append('dir', '/Voice Memos');
+
+  try {
+    $('#voice-save-btn').disabled = true;
+    $('#voice-save-btn').textContent = 'Saving...';
+    try { await api('POST', '/api/mkdir', { dir: '/', name: 'Voice Memos' }); } catch {}
+
+    const headers = state.vaultToken ? { 'X-Rdrive-Vault': state.vaultToken } : {};
+    const res = await fetch('/api/upload', {
+      method: 'POST',
+      body: fd,
+      headers: { ...headers, 'X-Rdrive': '1' },
+      credentials: 'include',
+    });
+    if (!res.ok) throw new Error('Failed to upload voice memo');
+
+    $('#voice-memo-dialog').close();
+    toast('Voice memo saved to /Voice Memos');
+    if (state.path === '/Voice Memos') await load();
+    playAudioDock(filename, p);
+  } catch (err) {
+    toast(`Could not save voice memo: ${err.message}`);
+  } finally {
+    $('#voice-save-btn').disabled = false;
+    $('#voice-save-btn').textContent = 'Save to Drive';
+  }
+});
+
+$('#voice-discard-btn').addEventListener('click', () => {
+  recordedVoiceBlob = null;
+  $('#voice-memo-timer').textContent = '00:00';
+  $('#voice-record-btn').textContent = 'Start Recording';
+  $('#voice-save-btn').hidden = true;
+  $('#voice-discard-btn').hidden = true;
+  drawIdleWaveform($('#voice-memo-canvas'));
+});
+
+$('#voice-memo-close').addEventListener('click', () => {
+  if (voiceMediaRecorder && voiceMediaRecorder.state === 'recording') {
+    stopVoiceRecording();
+  }
+  $('#voice-memo-dialog').close();
+});
+
+
+// ==================== Storage Analytics & Cleaner ====================
+
+const STORAGE_CAT_COLORS = {
+  photos: '#0d9488',
+  videos: '#8b5cf6',
+  audio: '#ec4899',
+  documents: '#3b82f6',
+  sheets: '#10b981',
+  code: '#f59e0b',
+  backups: '#6366f1',
+  archives: '#ef4444',
+  other: '#64748b',
+};
+
+async function openStorageDialog() {
+  const dlg = $('#storage-dialog');
+  dlg.showModal();
+  $('#storage-duplicates-list').innerHTML = '<p class="muted small">Scanning files for duplicates…</p>';
+  $('#storage-large-list').innerHTML = '<p class="muted small">Scanning for large files…</p>';
+  $('#clean-duplicates-btn').hidden = true;
+
+  try {
+    const data = await api('GET', '/api/storage/analytics');
+    renderStorageBreakdown(data);
+  } catch (err) {
+    $('#storage-duplicates-list').innerHTML = `<p class="error">${err.message}</p>`;
+  }
+}
+
+function renderStorageBreakdown(data) {
+  const bar = $('#storage-bar');
+  const legend = $('#storage-legend');
+  bar.replaceChildren();
+  legend.replaceChildren();
+
+  const total = data.totalBytes || 1;
+  const cats = data.categories || {};
+
+  for (const [key, val] of Object.entries(cats)) {
+    const bytes = typeof val === 'object' && val !== null ? val.bytes : Number(val);
+    if (!bytes) continue;
+    const color = STORAGE_CAT_COLORS[key] || '#94a3b8';
+    const pct = ((bytes / total) * 100).toFixed(1);
+
+    const seg = document.createElement('div');
+    seg.className = 'storage-bar-seg';
+    seg.style.width = `${pct}%`;
+    seg.style.backgroundColor = color;
+    seg.title = `${key.toUpperCase()}: ${formatSize(bytes)} (${pct}%)`;
+    bar.appendChild(seg);
+
+    const leg = document.createElement('div');
+    leg.className = 'storage-legend-item';
+    leg.innerHTML = `<span class="storage-legend-dot" style="background:${color}"></span><span><strong>${key[0].toUpperCase() + key.slice(1)}</strong>: ${formatSize(bytes)}</span>`;
+    legend.appendChild(leg);
+  }
+
+  // Duplicates
+  const dupList = $('#storage-duplicates-list');
+  dupList.replaceChildren();
+  const cleanBtn = $('#clean-duplicates-btn');
+
+  const dupes = data.duplicates || [];
+  if (dupes.length === 0) {
+    dupList.innerHTML = '<p class="muted small">No duplicate files found. Your drive is clean!</p>';
+    cleanBtn.hidden = true;
+  } else {
+    let totalSavings = 0;
+    const pathsToClean = [];
+
+    for (const cluster of dupes) {
+      totalSavings += cluster.potentialSavings || 0;
+      const el = document.createElement('div');
+      el.className = 'duplicate-cluster';
+
+      const head = document.createElement('div');
+      head.className = 'duplicate-head';
+      head.innerHTML = `<strong>${cluster.files[0].name}</strong> <span class="muted small">${formatSize(cluster.size)} each · Free up ${formatSize(cluster.potentialSavings)}</span>`;
+      el.appendChild(head);
+
+      cluster.files.forEach((f, idx) => {
+        const row = document.createElement('div');
+        row.className = 'duplicate-file-row';
+        if (idx === 0) {
+          row.innerHTML = `<span>Keep: <code class="mono">${f.path}</code></span><span class="chip">Original</span>`;
+        } else {
+          pathsToClean.push(f.path);
+          row.innerHTML = `<span>Clean: <code class="mono">${f.path}</code></span><span class="muted">${formatDate(f.mtime)}</span>`;
+        }
+        el.appendChild(row);
+      });
+      dupList.appendChild(el);
+    }
+
+    cleanBtn.hidden = false;
+    cleanBtn.textContent = `Clean All Duplicates (Free up ${formatSize(totalSavings)})`;
+    cleanBtn.onclick = async () => {
+      if (!confirm(`Delete ${pathsToClean.length} duplicate file(s) and free up ${formatSize(totalSavings)}?`)) return;
+      try {
+        await api('POST', '/api/delete', { paths: pathsToClean });
+        toast(`Freed ${formatSize(totalSavings)}!`);
+        openStorageDialog();
+        load();
+      } catch (err) {
+        toast(`Error cleaning duplicates: ${err.message}`);
+      }
+    };
+  }
+
+  // Large Files
+  const largeList = $('#storage-large-list');
+  largeList.replaceChildren();
+  const largeFiles = data.largeFiles || [];
+  if (largeFiles.length === 0) {
+    largeList.innerHTML = '<p class="muted small">No large files found (> 10 MB).</p>';
+  } else {
+    for (const lf of largeFiles) {
+      const row = document.createElement('div');
+      row.className = 'duplicate-cluster';
+      row.style.cursor = 'pointer';
+      row.innerHTML = `<div class="duplicate-head"><strong>${lf.name}</strong> <span>${formatSize(lf.size)}</span></div><div class="muted small mono">${lf.path}</div>`;
+      row.onclick = () => {
+        $('#storage-dialog').close();
+        openEntry({ name: lf.name, path: lf.path, type: 'file' });
+      };
+      largeList.appendChild(row);
+    }
+  }
+}
+
+$('#storage-close').addEventListener('click', () => $('#storage-dialog').close());
+$('#usage').style.cursor = 'pointer';
+$('#usage').title = 'Click to view Storage Analytics & Duplicate Cleaner';
+$('#usage').addEventListener('click', () => openStorageDialog());
+const youUsage = $('#you-usage');
+if (youUsage) {
+  youUsage.style.cursor = 'pointer';
+  youUsage.title = 'Click to view Storage Analytics & Duplicate Cleaner';
+  youUsage.addEventListener('click', () => {
+    $('#account-dialog').close();
+    openStorageDialog();
+  });
+}
+
+
+// ==================== Quick Code & Config Editor ====================
+
+let currentCodePath = null;
+
+async function openCodeEditor(name, path) {
+  currentCodePath = path;
+  $('#code-editor-title').textContent = name;
+  $('#code-editor-status').textContent = 'Loading...';
+  $('#code-editor-content').value = '';
+  $('#code-editor-dialog').showModal();
+
+  try {
+    const res = await api('GET', `/api/code/read?path=${encodeURIComponent(path)}`);
+    $('#code-editor-content').value = res.content || '';
+    const lineCount = (res.content || '').split('\n').length;
+    $('#code-editor-status').textContent = `${lineCount} line${lineCount === 1 ? '' : 's'} · ${formatSize(res.bytes || (res.content || '').length)}`;
+  } catch (err) {
+    $('#code-editor-status').textContent = 'Error loading file';
+    toast(`Failed to load code: ${err.message}`);
+  }
+}
+
+async function saveCurrentCode() {
+  if (!currentCodePath) return;
+  const statusEl = $('#code-editor-status');
+  statusEl.textContent = 'Saving...';
+  try {
+    const content = $('#code-editor-content').value;
+    await api('POST', '/api/code/save', { path: currentCodePath, content });
+    statusEl.textContent = 'Saved ✓';
+    toast('File saved successfully.');
+    setTimeout(() => {
+      if (statusEl.textContent === 'Saved ✓') {
+        const lineCount = content.split('\n').length;
+        statusEl.textContent = `${lineCount} line${lineCount === 1 ? '' : 's'} · ${formatSize(content.length)}`;
+      }
+    }, 2000);
+  } catch (err) {
+    statusEl.textContent = 'Save failed';
+    toast(`Save error: ${err.message}`);
+  }
+}
+
+$('#code-editor-content').addEventListener('keydown', (e) => {
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
+    e.preventDefault();
+    saveCurrentCode();
+  } else if (e.key === 'Tab') {
+    e.preventDefault();
+    const textarea = e.target;
+    const start = textarea.selectionStart;
+    const end = textarea.selectionEnd;
+    textarea.value = textarea.value.substring(0, start) + '  ' + textarea.value.substring(end);
+    textarea.selectionStart = textarea.selectionEnd = start + 2;
+  }
+});
+
+$('#code-editor-save').addEventListener('click', () => saveCurrentCode());
+$('#code-editor-close').addEventListener('click', () => $('#code-editor-dialog').close());
 
 (async function boot() {
   if (location.pathname === '/pair' || location.pathname.startsWith('/pair/')) {
