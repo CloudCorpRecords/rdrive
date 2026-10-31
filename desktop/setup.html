@@ -37,15 +37,16 @@
 
     <label class="field" id="url-field">
       <span>Drive address</span>
-      <input name="serverUrl" placeholder="https://my-computer.my-tailnet.ts.net" autocomplete="off" spellcheck="false">
+      <div class="pick"><input name="serverUrl" placeholder="https://my-computer.my-tailnet.ts.net" autocomplete="off" spellcheck="false"><button type="button" id="detect" hidden>Detect</button></div>
       <small class="muted" id="url-hint">The https address your devices use, usually your Tailscale address.</small>
+      <div class="detect-status" id="detect-status" hidden><span id="detect-text"></span><button type="button" id="enable-serve" hidden>Turn on</button></div>
     </label>
 
     <div id="host-fields">
       <label class="field">
         <span>Folder for your files</span>
         <div class="pick"><input name="dataDir" readonly><button type="button" id="pick-data">Choose…</button></div>
-        <small class="muted">rdrive keeps your files, accounts and settings here. If you already ran rdrive, choose its <code>data</code> folder to keep everything.</small>
+        <small class="muted" id="data-hint">rdrive keeps your files, accounts and settings here. If you already ran rdrive, choose its <code>data</code> folder to keep everything.</small>
       </label>
       <label class="field">
         <span>Extra settings file (optional)</span>

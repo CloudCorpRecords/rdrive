@@ -6,5 +6,6 @@
     <item android:id="@+id/upload_now" android:title="@string/menu_upload_now" android:showAsAction="never" />
     <item android:id="@+id/stop_folder" android:title="@string/menu_stop_folder" android:showAsAction="never" />
     <item android:id="@+id/reload" android:title="@string/menu_reload" android:showAsAction="never" />
+    <item android:id="@+id/check_updates" android:title="@string/menu_check_updates" android:showAsAction="never" />
     <item android:id="@+id/change_address" android:title="@string/menu_change_address" android:showAsAction="never" />
 </menu>

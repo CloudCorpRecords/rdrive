@@ -7,6 +7,8 @@ const fs = require('node:fs');
 const http = require('node:http');
 const path = require('node:path');
 const { Settings, readEnvFile } = require('./settings');
+const updater = require('./updater');
+const detect = require('./detect');
 
 const HIDDEN = process.argv.includes('--hidden');
 let settings;
@@ -18,6 +20,7 @@ let serverState = 'stopped'; // stopped | starting | running | crashed
 let restartDelay = 1000;
 let quitting = false;
 let usingLocalFallback = false;
+let updates = null; // desktop/updater.js
 
 if (!app.requestSingleInstanceLock()) {
   app.quit();
@@ -280,6 +283,29 @@ function updateTray() {
   } else if (v.serverUrl) {
     items.push({ label: `Drive: ${v.serverUrl}`, enabled: false }, { type: 'separator' });
   }
+  if (updates && updates.live) {
+    const st = updates.status();
+    items.push({ label: updates.statusLabel(), enabled: false });
+    if (st.state === 'ready' || st.state === 'available' || st.state === 'downloading') {
+      items.push({ label: `Restart to update to ${st.latest}`, enabled: st.state !== 'installing', click: () => updates.install() });
+    } else if (st.state === 'manual') {
+      items.push({ label: `Download ${st.latest}…`, click: () => updates.install() });
+    } else {
+      items.push({ label: 'Check for updates…', enabled: st.state !== 'checking' && st.state !== 'installing', click: () => updates.menuCheck() });
+    }
+    items.push(
+      {
+        label: 'Update automatically',
+        type: 'checkbox',
+        checked: v.autoUpdate !== false,
+        click: (item) => {
+          if (settings.configured) settings.update({ autoUpdate: item.checked });
+          else settings.values.autoUpdate = item.checked;
+        },
+      },
+      { type: 'separator' }
+    );
+  }
   items.push(
     { label: 'Settings…', click: showSetup },
     { label: host ? 'Quit (stops the drive)' : 'Quit', click: () => app.quit() }
@@ -308,6 +334,22 @@ function fromSetupWindow(e) {
 }
 
 ipcMain.handle('settings:get', (e) => (fromSetupWindow(e) ? { ...settings.values, platform: process.platform } : null));
+
+// Suggestions for the setup screen: Tailscale address, existing data folder and settings file.
+ipcMain.handle('settings:detect', (e, port) => {
+  if (!fromSetupWindow(e)) return null;
+  const p = Number(port) || settings.values.port;
+  const dataDirs = detect.existingDataDirs(settings.values.dataDir);
+  return { tailscale: detect.detectTailscale(p), dataDirs, envFile: detect.existingEnvFile(dataDirs[0] || settings.values.dataDir) };
+});
+
+// "Turn on" in setup: make Tailscale serve rdrive over HTTPS to your devices.
+ipcMain.handle('settings:enable-serve', (e, port) => {
+  if (!fromSetupWindow(e)) return null;
+  const r = detect.enableServe(Number(port) || settings.values.port);
+  if (r.approveUrl) shell.openExternal(r.approveUrl);
+  return r;
+});
 
 ipcMain.handle('settings:choose-folder', async (e) => {
   if (!fromSetupWindow(e)) return null;
@@ -347,8 +389,19 @@ ipcMain.handle('settings:save', async (e, next) => {
 
 // ---------- app lifecycle ----------
 
+// A short record of each start (version, how it was launched, mode), next to the server log.
+function appLog(line) {
+  try {
+    const f = path.join(app.getPath('userData'), 'logs', 'app.log');
+    fs.mkdirSync(path.dirname(f), { recursive: true });
+    if (fs.existsSync(f) && fs.statSync(f).size > 1024 * 1024) fs.renameSync(f, f + '.old');
+    fs.appendFileSync(f, `${new Date().toISOString()} ${line}\n`);
+  } catch {}
+}
+
 app.whenReady().then(() => {
   settings = new Settings(app.getPath('userData'));
+  appLog(`start ${app.getVersion()} pid=${process.pid} args=${JSON.stringify(process.argv.slice(1))} settings=${settings.file} configured=${settings.configured} mode=${settings.values.mode} loadError=${settings.loadError || ''}`);
   // The drive never needs camera, microphone, location, notifications, etc.
   session.defaultSession.setPermissionRequestHandler((_wc, _perm, cb) => cb(false));
   Menu.setApplicationMenu(
@@ -360,6 +413,16 @@ app.whenReady().then(() => {
       { role: 'windowMenu' },
     ])
   );
+  updates = updater.start({
+    // A drive hosted here runs unattended, so verified updates install straight away.
+    autoInstall: () => settings.values.mode === 'host',
+    enabled: () => settings.values.autoUpdate !== false,
+    beforeInstall: async () => {
+      quitting = true;
+      await stopServer();
+    },
+  });
+  updates.onState(() => updateTray());
   createTray();
   if (!settings.configured) return showSetup();
   if (settings.values.mode === 'host') startServer();
@@ -375,6 +438,8 @@ app.on('window-all-closed', () => {
 });
 
 app.on('before-quit', (e) => {
+  // An update that's downloaded and checked installs on the way out.
+  if (updates) updates.onQuit();
   if (quitting) return;
   quitting = true;
   if (server) {

@@ -16,7 +16,8 @@
     "deluser": "node server.js deluser",
     "users": "node server.js users",
     "test": "node --test test/*.test.js",
-    "vendor": "node scripts/vendor.js"
+    "vendor": "node scripts/vendor.js",
+    "release": "node scripts/release.js"
   },
   "keywords": [
     "drive",

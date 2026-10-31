@@ -6,4 +6,6 @@ contextBridge.exposeInMainWorld('rdrive', {
   chooseFolder: () => ipcRenderer.invoke('settings:choose-folder'),
   chooseFile: () => ipcRenderer.invoke('settings:choose-file'),
   save: (values) => ipcRenderer.invoke('settings:save', values),
+  detect: (port) => ipcRenderer.invoke('settings:detect', port),
+  enableServe: (port) => ipcRenderer.invoke('settings:enable-serve', port),
 });
