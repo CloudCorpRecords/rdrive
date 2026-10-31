@@ -1482,6 +1482,8 @@ $('#bottom-nav').addEventListener('click', (e) => {
     $('#search-input').value = '';
     state.searchQuery = '';
     loadStarred();
+  } else if (nav === 'xod') {
+    openXodDialog();
   } else if (nav === 'search') {
     setNav('search');
     window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -1507,6 +1509,10 @@ $('#starred-btn').addEventListener('click', () => {
   $('#search-input').value = '';
   state.searchQuery = '';
   loadStarred();
+});
+
+$('#xod-btn').addEventListener('click', () => {
+  openXodDialog();
 });
 
 let currentPhotoItems = [];
@@ -2845,6 +2851,7 @@ window.addEventListener('touchend', async (e) => {
 window.addEventListener('hashchange', () => {
   if (location.hash === '#photos') loadPhotos('all');
   else if (location.hash === '#starred') loadStarred();
+  else if (location.hash === '#xod') openXodDialog();
   else if (location.hash === '#scan') { $('#scanner-input').click(); }
   else if (location.hash === '#new-doc') { createNewDocument(); }
 });
@@ -3335,6 +3342,192 @@ $('#code-editor-content').addEventListener('keydown', (e) => {
 
 $('#code-editor-save').addEventListener('click', () => saveCurrentCode());
 $('#code-editor-close').addEventListener('click', () => $('#code-editor-dialog').close());
+
+// ==================== 5. Xod Agent Copilot & Harness ====================
+
+let xodChatHistory = [];
+let xodStatus = null;
+
+async function openXodDialog() {
+  const dlg = $('#xod-dialog');
+  dlg.showModal();
+  updateXodStatus();
+}
+
+async function updateXodStatus() {
+  const statusChip = $('#xod-status-chip');
+  const activeModelEl = $('#xod-active-model');
+  const modelSelect = $('#xod-model-select');
+
+  try {
+    xodStatus = await api('GET', '/api/xod/status');
+    if (xodStatus.connected) {
+      statusChip.textContent = '● Connected';
+      statusChip.className = 'chip chip-success small';
+      activeModelEl.textContent = xodStatus.activeModel || 'Engine online';
+
+      // Populate model selector
+      modelSelect.replaceChildren();
+      for (const m of (xodStatus.models || [])) {
+        const opt = document.createElement('option');
+        opt.value = m.id;
+        opt.textContent = m.name || m.id;
+        if (m.id === xodStatus.activeModel) opt.selected = true;
+        modelSelect.appendChild(opt);
+      }
+    } else {
+      statusChip.textContent = '○ Offline';
+      statusChip.className = 'chip small';
+      activeModelEl.textContent = 'No local model found';
+    }
+  } catch (err) {
+    statusChip.textContent = '○ Error';
+    statusChip.className = 'chip chip-danger small';
+    activeModelEl.textContent = err.message;
+  }
+}
+
+function appendXodMessage(role, text) {
+  const container = $('#xod-messages');
+  const wrap = document.createElement('div');
+  wrap.className = `xod-msg xod-msg-${role}`;
+  const bubble = document.createElement('div');
+  bubble.className = 'xod-bubble';
+  bubble.textContent = text;
+  wrap.appendChild(bubble);
+  container.appendChild(wrap);
+  container.scrollTop = container.scrollHeight;
+  return bubble;
+}
+
+function appendXodToolEvent(fnName, args) {
+  const container = $('#xod-messages');
+  const card = document.createElement('div');
+  card.className = 'xod-tool-card';
+  card.innerHTML = `<span class="spinner-dot"></span><span>🔧 Invoking <code>${fnName}</code>…</span>`;
+  container.appendChild(card);
+  container.scrollTop = container.scrollHeight;
+  return card;
+}
+
+function updateXodToolResult(card, fnName, result) {
+  let summary = 'Finished';
+  if (result.count !== undefined) summary = `Found ${result.count} items`;
+  else if (result.cleaned !== undefined) summary = `Cleaned ${result.cleaned} files`;
+  else if (result.totalFiles !== undefined) summary = `${result.totalFiles} files · ${formatSize(result.totalBytes || 0)}`;
+  else if (result.ok) summary = 'Success';
+  else if (result.error) summary = `Error: ${result.error}`;
+
+  card.innerHTML = `<span>✅</span><span><strong>${fnName}</strong>: ${summary}</span>`;
+}
+
+async function sendXodPrompt(promptText) {
+  if (!promptText || !promptText.trim()) return;
+  const input = $('#xod-input');
+  input.value = '';
+
+  appendXodMessage('user', promptText);
+  xodChatHistory.push({ role: 'user', content: promptText });
+
+  const sendBtn = $('#xod-send-btn');
+  sendBtn.disabled = true;
+
+  const assistantBubble = appendXodMessage('assistant', 'Thinking…');
+  let toolCard = null;
+  let didModifyDrive = false;
+
+  const model = $('#xod-model-select').value || null;
+
+  try {
+    const res = await fetch('/api/xod/chat', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Rdrive': '1',
+      },
+      credentials: 'include',
+      body: JSON.stringify({
+        messages: xodChatHistory,
+        model,
+        stream: true,
+      }),
+    });
+
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    assistantBubble.textContent = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+
+      const lines = buffer.split('\n\n');
+      buffer = lines.pop();
+
+      for (const chunk of lines) {
+        if (!chunk.startsWith('data: ')) continue;
+        const jsonStr = chunk.slice(6).trim();
+        if (!jsonStr) continue;
+
+        try {
+          const evt = JSON.parse(jsonStr);
+          if (evt.type === 'reasoning') {
+            let rEl = assistantBubble.querySelector('.xod-reasoning');
+            if (!rEl) {
+              rEl = document.createElement('div');
+              rEl.className = 'xod-reasoning';
+              assistantBubble.prepend(rEl);
+            }
+            rEl.textContent = evt.content;
+          } else if (evt.type === 'tool_call') {
+            didModifyDrive = true;
+            toolCard = appendXodToolEvent(evt.name, evt.args);
+          } else if (evt.type === 'tool_result') {
+            if (toolCard) updateXodToolResult(toolCard, evt.name, evt.result);
+          } else if (evt.type === 'content') {
+            assistantBubble.textContent = evt.content;
+          } else if (evt.type === 'delta') {
+            assistantBubble.textContent += evt.content;
+          } else if (evt.type === 'done' && evt.response) {
+            assistantBubble.textContent = evt.response.content;
+            xodChatHistory.push({ role: 'assistant', content: evt.response.content });
+          } else if (evt.type === 'error') {
+            assistantBubble.textContent = `Error: ${evt.error}`;
+          }
+        } catch {}
+      }
+    }
+
+    if (didModifyDrive) {
+      load();
+    }
+  } catch (err) {
+    assistantBubble.textContent = `Agent error: ${err.message}`;
+  } finally {
+    sendBtn.disabled = false;
+    $('#xod-messages').scrollTop = $('#xod-messages').scrollHeight;
+  }
+}
+
+$('#xod-form').addEventListener('submit', (e) => {
+  e.preventDefault();
+  const val = $('#xod-input').value;
+  sendXodPrompt(val);
+});
+
+$('#xod-quick-chips').addEventListener('click', (e) => {
+  const chip = e.target.closest('[data-prompt]');
+  if (!chip) return;
+  const prompt = chip.dataset.prompt;
+  sendXodPrompt(prompt);
+});
+
+$('#xod-close').addEventListener('click', () => $('#xod-dialog').close());
 
 (async function boot() {
   if (location.pathname === '/pair' || location.pathname.startsWith('/pair/')) {

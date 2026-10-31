@@ -36,4 +36,16 @@
             android:targetClass="io.github.cloudcorprecords.rdrive.MainActivity"
             android:data="rdrive://shortcut?action=starred" />
     </shortcut>
+    <shortcut
+        android:shortcutId="xod_agent"
+        android:enabled="true"
+        android:icon="@mipmap/ic_launcher"
+        android:shortcutShortLabel="@string/shortcut_xod"
+        android:shortcutLongLabel="@string/shortcut_xod">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:targetPackage="io.github.cloudcorprecords.rdrive"
+            android:targetClass="io.github.cloudcorprecords.rdrive.MainActivity"
+            android:data="rdrive://shortcut?action=xod" />
+    </shortcut>
 </shortcuts>

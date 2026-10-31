@@ -1361,4 +1361,160 @@ input:not([type="checkbox"]):focus-visible { outline: 2px solid var(--accent); o
   overflow: auto;
 }
 
+/* ==================== 5. Xod Agent Copilot Drawer ==================== */
+.xod-dialog {
+  max-width: 620px;
+  width: 95vw;
+  height: 82vh;
+  max-height: 740px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  display: flex;
+  flex-direction: column;
+  padding: 0;
+  color: var(--text);
+  overflow: hidden;
+}
+.xod-head {
+  padding: 12px 18px;
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.xod-title-wrap {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.xod-icon {
+  font-size: 22px;
+}
+.xod-status-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+}
+.xod-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.xod-quick-chips {
+  display: flex;
+  gap: 8px;
+  padding: 8px 16px;
+  overflow-x: auto;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+  white-space: nowrap;
+}
+.xod-chip {
+  cursor: pointer;
+  font-size: 11px;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  border-radius: 12px;
+  padding: 4px 10px;
+  transition: all 0.15s ease;
+}
+.xod-chip:hover {
+  background: var(--primary);
+  color: #fff;
+  border-color: var(--primary);
+}
+.xod-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.xod-msg {
+  display: flex;
+  flex-direction: column;
+  max-width: 88%;
+}
+.xod-msg-user {
+  align-self: flex-end;
+}
+.xod-msg-user .xod-bubble {
+  background: var(--primary);
+  color: #fff;
+  border-radius: 16px 16px 4px 16px;
+  padding: 10px 14px;
+  font-size: 13px;
+}
+.xod-msg-assistant {
+  align-self: flex-start;
+}
+.xod-msg-assistant .xod-bubble {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 16px 16px 16px 4px;
+  padding: 12px 14px;
+  font-size: 13px;
+  line-height: 1.5;
+}
+.xod-tool-card {
+  background: rgba(13, 148, 136, 0.12);
+  border-left: 3px solid #0d9488;
+  border-radius: 4px;
+  padding: 6px 10px;
+  font-size: 11px;
+  margin: 4px 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.xod-reasoning {
+  font-size: 11px;
+  color: var(--muted);
+  font-style: italic;
+  background: rgba(0, 0, 0, 0.15);
+  border-radius: 6px;
+  padding: 6px 10px;
+  margin-bottom: 6px;
+  max-height: 120px;
+  overflow-y: auto;
+}
+.xod-input-bar {
+  display: flex;
+  gap: 8px;
+  padding: 12px 18px;
+  border-top: 1px solid var(--border);
+  background: var(--surface-2);
+}
+.xod-input-bar input {
+  flex: 1;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  border-radius: var(--radius);
+  padding: 8px 12px;
+  font-size: 13px;
+  outline: none;
+}
+.xod-input-bar input:focus {
+  border-color: var(--primary);
+}
+@media (max-width: 768px) {
+  .xod-dialog {
+    width: 100vw;
+    height: 85vh;
+    max-height: 85vh;
+    border-radius: 20px 20px 0 0;
+    margin: auto 0 0 0;
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+  }
+}
+
 

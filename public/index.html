@@ -110,6 +110,7 @@
         <button class="btn btn-ghost small" id="photos-btn" title="Photos &amp; media timeline">Photos</button>
         <button class="btn btn-ghost small" id="starred-btn" title="Starred files">Starred</button>
         <button class="btn btn-ghost small" id="vault-btn" title="Encrypted Private Vault">Vault</button>
+        <button class="btn btn-ghost small" id="xod-btn" title="Xod AI Agent &amp; Model Harness">🔮 Xod</button>
         <button class="btn btn-ghost small" id="trash-btn" title="View deleted items">Trash</button>
         <button id="whoami" class="chip chip-btn" title="Account and devices"></button>
         <button class="btn btn-ghost" id="logout">Sign out</button>
@@ -180,6 +181,7 @@
       <button type="button" data-nav="files" class="active"><span data-icon="folder"></span>Files</button>
       <button type="button" data-nav="photos"><span data-icon="image"></span>Photos</button>
       <button type="button" data-nav="starred"><span data-icon="star"></span>Starred</button>
+      <button type="button" data-nav="xod"><span class="icon">🔮</span>Xod</button>
       <button type="button" data-nav="search"><span data-icon="search"></span>Search</button>
       <button type="button" data-nav="you"><span data-icon="user"></span>You</button>
     </nav>
@@ -928,6 +930,44 @@
     <div class="code-editor-wrap">
       <textarea id="code-editor-content" spellcheck="false" class="code-editor-area"></textarea>
     </div>
+  </dialog>
+
+  <!-- 5. Xod AI Agent Copilot & Model Harness -->
+  <dialog id="xod-dialog" class="xod-dialog">
+    <div class="xod-head">
+      <div class="xod-title-wrap">
+        <span class="xod-icon">🔮</span>
+        <div>
+          <strong>Xod AI Agent</strong>
+          <div class="xod-status-line">
+            <span class="chip chip-success small" id="xod-status-chip">● Connected</span>
+            <span class="muted small" id="xod-active-model">Checking engine…</span>
+          </div>
+        </div>
+      </div>
+      <div class="xod-head-actions">
+        <select id="xod-model-select" class="select-input small" title="Switch model"></select>
+        <button class="btn small btn-ghost" id="xod-close" type="button">✕</button>
+      </div>
+    </div>
+    <div class="xod-quick-chips" id="xod-quick-chips">
+      <button class="chip xod-chip" data-prompt="Analyze storage breakdown and check for duplicate files">🧹 Clean Space</button>
+      <button class="chip xod-chip" data-prompt="Summarize my recent files and photos">📊 Drive Summary</button>
+      <button class="chip xod-chip" data-prompt="Create a project planning document in /Docs/Plan.rdoc">📝 Draft Plan RDoc</button>
+      <button class="chip xod-chip" data-prompt="Create a monthly budget sheet in /Budget.rsheet">📈 Budget Sheet</button>
+      <button class="chip xod-chip" data-prompt="Check my encrypted vault status">🔒 Vault Status</button>
+    </div>
+    <div class="xod-body" id="xod-messages">
+      <div class="xod-msg xod-msg-assistant">
+        <div class="xod-bubble">
+          👋 Hi! I'm <strong>Xod</strong>, your private AI agent running directly on your computer. I can manage, search, clean, create documents, build spreadsheets, and control your entire RDrive from here or your phone. How can I help?
+        </div>
+      </div>
+    </div>
+    <form class="xod-input-bar" id="xod-form">
+      <input id="xod-input" type="text" placeholder="Ask Xod to organize, write, or control RDrive…" autocomplete="off" required>
+      <button class="btn btn-primary" id="xod-send-btn" type="submit">Send</button>
+    </form>
   </dialog>
 
   <div id="toast" class="toast" role="status" hidden></div>

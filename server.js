@@ -33,6 +33,7 @@ const { WatcherManager } = require('./lib/watchers');
 const { StarredManager } = require('./lib/starred');
 const { VaultManager } = require('./lib/vault');
 const { getStorageAnalytics } = require('./lib/storage_cleanup');
+const { XodBridge } = require('./lib/xod_bridge');
 
 const DATA_DIR = path.resolve(process.env.RDRIVE_DATA || path.join(__dirname, 'data'));
 const PORT = Number(process.env.PORT || 8443);
@@ -209,13 +210,14 @@ function defaultSheetPayload(title = 'Sheet 1') {
 }
 
 // options: { auth, files, github?, sync?, shares?, pairing?, secureCookies?, trustProxy? }
-function createHandler({ auth, files, github = null, sync = null, shares = null, pairing = null, ocrStore = null, watchers = null, starred = null, vault = null, secureCookies = USE_HTTPS, trustProxy = TRUST_PROXY }) {
+function createHandler({ auth, files, github = null, sync = null, shares = null, pairing = null, ocrStore = null, watchers = null, starred = null, vault = null, xodBridge = null, secureCookies = USE_HTTPS, trustProxy = TRUST_PROXY }) {
   if (!shares && files && files.filesDir) shares = new Shares(path.dirname(files.filesDir));
   if (!pairing) pairing = new DevicePairing();
   if (!ocrStore && files && files.filesDir) ocrStore = new OCRStore(path.dirname(files.filesDir));
   if (!watchers && files && files.filesDir) watchers = new WatcherManager(path.dirname(files.filesDir), ocrStore);
   if (!starred && files && files.filesDir) starred = new StarredManager(path.dirname(files.filesDir));
   if (!vault && files && files.filesDir) vault = new VaultManager(path.dirname(files.filesDir));
+  if (!xodBridge && files) xodBridge = new XodBridge({ files, vault, shares });
   const mcp = new McpServer({ auth, files, shares, onChanged: () => sync && sync.localChanged() });
   const secure = secureCookies ? '; Secure' : '';
   const sessionCookie = (token, maxAgeSec) => `${COOKIE}=${token}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${maxAgeSec}${secure}`;
@@ -679,6 +681,59 @@ function createHandler({ auth, files, github = null, sync = null, shares = null,
         await files.writeBuffer(user, dir, name, Buffer.from(content, 'utf8'), { overwrite: true });
         changed();
         return sendJson(res, 200, { ok: true });
+      }
+
+      // ---- XOD Agent & Local Model Inference Bridge ----
+      if (route === '/api/xod/status' && req.method === 'GET') {
+        const status = await xodBridge.getStatus();
+        return sendJson(res, 200, status);
+      }
+      if (route === '/api/xod/action' && req.method === 'POST') {
+        const { tool, args } = await readJsonBody(req);
+        if (!tool) throw new HttpError(400, 'Tool name is required.');
+        const result = await xodBridge.executeTool(user, tool, args || {});
+        changed();
+        return sendJson(res, 200, { ok: true, tool, result });
+      }
+      if (route === '/api/xod/chat' && req.method === 'POST') {
+        const { messages, model, stream = false } = await readJsonBody(req);
+        if (!Array.isArray(messages) || !messages.length) throw new HttpError(400, 'Messages array is required.');
+
+        if (stream) {
+          res.writeHead(200, {
+            'Content-Type': 'text/event-stream',
+            'Cache-Control': 'no-cache',
+            'Connection': 'keep-alive',
+            'X-Accel-Buffering': 'no',
+          });
+          const sendEvt = (obj) => res.write(`data: ${JSON.stringify(obj)}\n\n`);
+
+          try {
+            const out = await xodBridge.runAgentTurn({
+              user,
+              messages,
+              model,
+              onEvent: (evt) => sendEvt(evt),
+            });
+            sendEvt({ type: 'done', response: out });
+            res.end();
+            changed();
+          } catch (err) {
+            sendEvt({ type: 'error', error: err.message });
+            res.end();
+          }
+          return;
+        } else {
+          const events = [];
+          const out = await xodBridge.runAgentTurn({
+            user,
+            messages,
+            model,
+            onEvent: (evt) => events.push(evt),
+          });
+          changed();
+          return sendJson(res, 200, { ok: true, events, response: out });
+        }
       }
 
       if (route === '/api/list' && req.method === 'GET') {

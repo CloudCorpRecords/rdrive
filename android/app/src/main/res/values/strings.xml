@@ -18,4 +18,5 @@
     <string name="shortcut_scan">Scan document</string>
     <string name="shortcut_photos">Photos</string>
     <string name="shortcut_starred">Starred</string>
+    <string name="shortcut_xod">Xod Agent</string>
 </resources>

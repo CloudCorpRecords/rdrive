@@ -69,6 +69,7 @@ class MainActivity : Activity() {
             "scan" -> "#scan"
             "photos" -> "#photos"
             "starred" -> "#starred"
+            "xod" -> "#xod"
             else -> "#/"
         }
         val server = Prefs.serverUrl(this) ?: return
