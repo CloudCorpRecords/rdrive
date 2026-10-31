@@ -3387,6 +3387,13 @@ async function updateXodStatus() {
   }
 }
 
+function xodRender(el, text) {
+  const esc = String(text).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  el.innerHTML = esc
+    .replace(/`([^`]+)`/g, '<code>$1</code>')
+    .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+}
+
 function appendXodMessage(role, text) {
   const container = $('#xod-messages');
   const wrap = document.createElement('div');
@@ -3405,7 +3412,8 @@ function appendXodToolEvent(fnName, args) {
   const card = document.createElement('div');
   card.className = 'xod-tool-card';
   card.innerHTML = `<span class="spinner-dot"></span><span>🔧 Invoking <code>${fnName}</code>…</span>`;
-  container.appendChild(card);
+  const live = container.querySelector('.xod-msg.xod-live');
+  if (live) container.insertBefore(card, live); else container.appendChild(card);
   container.scrollTop = container.scrollHeight;
   return card;
 }
@@ -3433,6 +3441,7 @@ async function sendXodPrompt(promptText) {
   sendBtn.disabled = true;
 
   const assistantBubble = appendXodMessage('assistant', 'Thinking…');
+  assistantBubble.parentElement.classList.add('xod-live');
   let toolCard = null;
   let didModifyDrive = false;
 
@@ -3490,11 +3499,11 @@ async function sendXodPrompt(promptText) {
           } else if (evt.type === 'tool_result') {
             if (toolCard) updateXodToolResult(toolCard, evt.name, evt.result);
           } else if (evt.type === 'content') {
-            assistantBubble.textContent = evt.content;
+            xodRender(assistantBubble, evt.content);
           } else if (evt.type === 'delta') {
             assistantBubble.textContent += evt.content;
           } else if (evt.type === 'done' && evt.response) {
-            assistantBubble.textContent = evt.response.content;
+            xodRender(assistantBubble, evt.response.content);
             xodChatHistory.push({ role: 'assistant', content: evt.response.content });
           } else if (evt.type === 'error') {
             assistantBubble.textContent = `Error: ${evt.error}`;

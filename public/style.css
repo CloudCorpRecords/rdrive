@@ -1504,17 +1504,44 @@ input:not([type="checkbox"]):focus-visible { outline: 2px solid var(--accent); o
   border-color: var(--primary);
 }
 @media (max-width: 768px) {
-  .xod-dialog {
-    width: 100vw;
-    height: 85vh;
-    max-height: 85vh;
-    border-radius: 20px 20px 0 0;
-    margin: auto 0 0 0;
+  dialog.xod-dialog[open] {
+    padding: 0;
     position: fixed;
-    bottom: 0;
-    left: 0;
-    right: 0;
+    inset: 0;
+    width: auto;
+    max-width: none;
+    box-sizing: border-box;
+    height: 100dvh;
+    max-height: 100dvh;
+    margin: 0;
+    border: 0;
+    border-radius: 0;
+    z-index: 100;
   }
+  .xod-head { padding: calc(env(safe-area-inset-top, 0px) + 10px) 12px 10px; gap: 8px; }
+  .xod-title-wrap { min-width: 0; flex: 1; }
+  .xod-title-wrap > div { min-width: 0; }
+  .xod-status-line { flex-wrap: wrap; }
+  #xod-active-model { max-width: 40vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .xod-head-actions { flex-shrink: 0; }
+  #xod-model-select { max-width: 120px; font-size: 12px; }
+  .xod-quick-chips { flex-shrink: 0; -webkit-overflow-scrolling: touch; scrollbar-width: none; }
+  .xod-quick-chips::-webkit-scrollbar { display: none; }
+  .xod-body { min-height: 0; overscroll-behavior: contain; }
+  .xod-msg { max-width: 94%; }
+  .xod-bubble { overflow-wrap: anywhere; white-space: pre-wrap; }
+  .xod-input-bar { flex-shrink: 0; padding: 10px 12px calc(env(safe-area-inset-bottom, 0px) + 10px); }
+  .xod-input-bar input { min-width: 0; width: 0; flex: 1 1 0; font-size: 16px; }
+  #xod-active-model { display: none; }
+  .xod-input-bar { box-sizing: border-box; width: 100%; }
+  .xod-input-bar .btn { flex: 0 0 auto; }
 }
 
 
+
+.xod-dialog:not([open]) { display: none; }
+
+@media (max-width: 768px) {
+  .xod-input-bar .btn { padding-left: 16px; padding-right: 16px; min-width: 0; max-width: 28vw; }
+  .xod-msg-assistant:first-child .xod-bubble { white-space: normal; }
+}
