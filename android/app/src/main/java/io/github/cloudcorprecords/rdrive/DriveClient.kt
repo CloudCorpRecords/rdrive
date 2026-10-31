@@ -75,6 +75,19 @@ class DriveClient(
         return runCatching { JSONObject(body).getString("name") }.getOrDefault(name)
     }
 
+    /** Uploads a text or JSON string into [dir] (e.g. manifest or info file). */
+    fun uploadText(dir: String, name: String, text: String, overwrite: Boolean = true): String {
+        val bytes = text.toByteArray(Charsets.UTF_8)
+        val query = "path=${enc(dir)}&name=${enc(safeName(name))}${if (overwrite) "&overwrite=1" else ""}"
+        val c = open("/api/upload?$query", "PUT")
+        c.doOutput = true
+        c.setRequestProperty("Content-Type", "application/octet-stream")
+        c.setFixedLengthStreamingMode(bytes.size.toLong())
+        c.outputStream.use { it.write(bytes) }
+        val body = check(c, 200)
+        return runCatching { JSONObject(body).getString("name") }.getOrDefault(name)
+    }
+
     /** Creates a new spreadsheet (.rsheet or .csv) in [dir] and returns its saved path. */
     fun createSpreadsheet(dir: String, name: String = "Untitled spreadsheet.rsheet"): String {
         val c = open("/api/sheet/create", "POST")

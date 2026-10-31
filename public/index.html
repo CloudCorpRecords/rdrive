@@ -2,14 +2,18 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>rdrive</title>
   <link rel="icon" href="/icon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="/style.css">
-  <script src="/interop.js" defer></script>
-  <script src="/sheet.js" defer></script>
-  <script src="/docs.js" defer></script>
-  <script src="/app.js" defer></script>
+  <link rel="manifest" href="/manifest.json">
+  <meta name="theme-color" content="#0f1412">
+  <link rel="stylesheet" href="/style.css?v=3">
+  <script src="/interop.js?v=3" defer></script>
+  <script src="/vendor/sql_engine.js?v=3" defer></script>
+  <script src="/sheet.js?v=3" defer></script>
+  <script src="/docs.js?v=3" defer></script>
+  <script src="/vendor/qrcode.js?v=3" defer></script>
+  <script src="/app.js?v=3" defer></script>
 </head>
 <body>
   <!-- Sign in / first-time setup -->
@@ -30,7 +34,37 @@
       <label id="confirm-row" hidden>Repeat password<input name="confirm" type="password" autocomplete="new-password"></label>
       <p id="auth-error" class="error" role="alert"></p>
       <button class="btn btn-primary" type="submit" id="auth-submit">Sign in</button>
+      <div id="auth-pair-opt" class="pair-alt">
+        <button class="btn btn-ghost small" id="auth-pair-btn" type="button">Sign in with another device</button>
+      </div>
     </form>
+
+    <!-- Sign in with another device card -->
+    <div id="pair-request-card" class="auth-card" hidden>
+      <div class="brand brand-lg"><img src="/icon.svg" alt="" width="32" height="32"> rdrive</div>
+      <h1>Sign in with another device</h1>
+      <p class="muted">On a phone or computer where you're already signed in to rdrive:</p>
+      <ol class="pair-steps">
+        <li>Open <strong>rdrive</strong> and tap <strong>You (Account)</strong>.</li>
+        <li>Under <strong>Signed-in devices</strong>, tap <strong>+ Connect a device</strong>.</li>
+        <li>Enter this approval code:</li>
+      </ol>
+      <div class="pair-code-display mono" id="pair-request-code">----</div>
+      <p class="pair-status-line" id="pair-request-status"><span class="spinner-dot"></span> Waiting for approval on your other device…</p>
+      <div class="dialog-actions pair-actions">
+        <button class="btn" id="pair-request-cancel" type="button">Use password instead</button>
+      </div>
+    </div>
+
+    <!-- Pair claim card for /pair#<token> -->
+    <div id="pair-claim-card" class="auth-card" hidden>
+      <div class="brand brand-lg"><img src="/icon.svg" alt="" width="32" height="32"> rdrive</div>
+      <h1 id="pair-claim-title">Connecting this device…</h1>
+      <p id="pair-claim-msg" class="muted">Please wait while your session is established.</p>
+      <div id="pair-claim-actions" class="dialog-actions pair-actions" hidden>
+        <button class="btn btn-primary" id="pair-claim-retry" type="button">Go to sign in</button>
+      </div>
+    </div>
   </main>
 
   <!-- Public share view (/s/:id) -->
@@ -72,7 +106,11 @@
         <input id="search-input" type="search" placeholder="Search your drive" aria-label="Search files" autocomplete="off">
       </div>
       <div class="topbar-right">
-        <span id="usage" class="muted small"></span>
+        <span id="usage" class="chip chip-btn" title="Storage analytics &amp; cleaner"></span>
+        <button class="btn btn-ghost small" id="photos-btn" title="Photos &amp; media timeline">Photos</button>
+        <button class="btn btn-ghost small" id="starred-btn" title="Starred files">Starred</button>
+        <button class="btn btn-ghost small" id="vault-btn" title="Encrypted Private Vault">Vault</button>
+        <button class="btn btn-ghost small" id="xod-btn" title="Xod AI Agent &amp; Model Harness">🔮 Xod</button>
         <button class="btn btn-ghost small" id="trash-btn" title="View deleted items">Trash</button>
         <button id="whoami" class="chip chip-btn" title="Account and devices"></button>
         <button class="btn btn-ghost" id="logout">Sign out</button>
@@ -116,15 +154,40 @@
       </div>
     </section>
 
+    <!-- Photos & Media Timeline -->
+    <section class="photos-view" id="photos-view" hidden>
+      <div class="photos-toolbar">
+        <div>
+          <strong id="photos-title">Photos &amp; Videos</strong>
+          <span class="muted small" id="photos-stats" style="margin-left: 8px;"></span>
+        </div>
+        <div class="photos-filters">
+          <button class="btn small active" id="photos-filter-all" type="button">All</button>
+          <button class="btn small" id="photos-filter-backups" type="button">Phone Backups</button>
+          <button class="btn small" id="photos-filter-videos" type="button">Videos</button>
+        </div>
+      </div>
+      <div class="photos-timeline" id="photos-timeline"></div>
+      <div id="photos-empty" class="empty" hidden>
+        <div class="empty-art" data-icon="image"></div>
+        <p><strong>No photos or videos yet.</strong></p>
+        <p class="muted">Upload photos or back up your phone camera to see your media timeline here.</p>
+      </div>
+    </section>
+
     <!-- Phones: the + button and the bottom bar (hidden on wider screens by style.css). -->
     <button class="fab" id="fab" type="button" aria-label="New" title="New"></button>
     <nav class="bottom-nav" id="bottom-nav" aria-label="Sections">
       <button type="button" data-nav="files" class="active"><span data-icon="folder"></span>Files</button>
+      <button type="button" data-nav="photos"><span data-icon="image"></span>Photos</button>
+      <button type="button" data-nav="starred"><span data-icon="star"></span>Starred</button>
+      <button type="button" data-nav="xod"><span class="icon">🔮</span>Xod</button>
       <button type="button" data-nav="search"><span data-icon="search"></span>Search</button>
-      <button type="button" data-nav="trash"><span data-icon="trash"></span>Trash</button>
       <button type="button" data-nav="you"><span data-icon="user"></span>You</button>
     </nav>
     <input id="camera-input" type="file" accept="image/*,video/*" capture="environment" hidden>
+    <input id="scanner-input" type="file" accept="image/*" capture="environment" hidden>
+    <div id="pull-refresh" class="pull-refresh" hidden><div class="pull-spinner"></div></div>
 
     <div id="drop-overlay" class="drop-overlay" hidden><div>Drop to upload here</div></div>
     <aside id="uploads" class="uploads" hidden>
@@ -138,6 +201,8 @@
   <div id="menu" class="menu" role="menu" hidden>
     <div class="menu-title" id="menu-title"></div>
     <button role="menuitem" data-act="open"><span data-icon="open"></span>Open</button>
+    <button role="menuitem" data-act="star" id="menu-star"><span data-icon="star"></span><span class="label">Star</span></button>
+    <button role="menuitem" data-act="details" id="menu-details"><span data-icon="info"></span>Details &amp; QR</button>
     <button role="menuitem" data-act="convert" id="menu-convert" hidden><span data-icon="edit"></span><span class="label">Open as RDoc</span></button>
     <button role="menuitem" data-act="share"><span data-icon="share"></span>Share link…</button>
     <button role="menuitem" data-act="download" id="menu-download"><span data-icon="download"></span><span class="label">Download</span></button>
@@ -150,6 +215,8 @@
   <!-- "New" sheet behind the + button -->
   <div id="new-menu" class="menu" role="menu" hidden>
     <div class="menu-title"><span>Add to this folder</span></div>
+    <button role="menuitem" data-new="scan"><span data-icon="camera"></span>Scan document</button>
+    <button role="menuitem" data-new="voice"><span data-icon="media"></span>Voice memo</button>
     <button role="menuitem" data-new="doc"><span data-icon="doc"></span>Document</button>
     <button role="menuitem" data-new="sheet"><span data-icon="sheet"></span>Spreadsheet</button>
     <button role="menuitem" data-new="folder"><span data-icon="folder"></span>Folder</button>
@@ -216,6 +283,15 @@
             </select>
           </label>
           <label>Optional password<input name="password" type="password" placeholder="Leave blank for anyone with the link" autocomplete="new-password"></label>
+          <label>Download limit (optional)
+            <select name="maxDownloads" class="select-input">
+              <option value="0" selected>Unlimited downloads</option>
+              <option value="1">Single-use (1 download)</option>
+              <option value="3">3 downloads</option>
+              <option value="10">10 downloads</option>
+              <option value="50">50 downloads</option>
+            </select>
+          </label>
           <label id="share-edit-row" class="check-row" hidden>
             <input type="checkbox" name="allowEdit"> Allow anyone with the link to edit
           </label>
@@ -306,7 +382,8 @@
     <div class="sheet-formula-bar">
       <span id="sheet-cell-addr" class="sheet-addr mono">A1</span>
       <span class="sheet-fx mono">fx</span>
-      <input id="sheet-formula-input" type="text" placeholder="Enter value or formula (e.g. =SUM(A1:A10), =AVERAGE(B1:B5), =IF(A1>100, &quot;High&quot;, &quot;OK&quot;))" autocomplete="off" spellcheck="false">
+      <input id="sheet-formula-input" type="text" placeholder="Enter value or formula (e.g. =SUM(A1:A10), =SQL(...), =AI(...))" autocomplete="off" spellcheck="false">
+      <button id="sheet-ai-copilot-btn" class="sheet-btn-copilot" type="button" title="AI Formula Copilot (Ctrl+Shift+F)">✨ AI</button>
     </div>
     <div class="sheet-grid-wrap" id="sheet-grid-wrap">
       <table class="sheet-table" id="sheet-table"></table>
@@ -317,6 +394,27 @@
         <button class="btn small" id="sheet-add-tab" type="button" title="Add sheet tab">+</button>
       </div>
       <div id="sheet-stats" class="muted small mono">Ready</div>
+    </div>
+  </dialog>
+
+  <!-- RSheets: AI Formula Copilot -->
+  <dialog id="sheet-copilot-dialog" class="copilot-dialog">
+    <div class="copilot-header">
+      <span class="copilot-title">✨ AI Formula Copilot</span>
+      <button type="button" class="btn small btn-ghost" id="sheet-copilot-close">✕</button>
+    </div>
+    <div class="copilot-body">
+      <label class="small muted">Describe what you want to calculate:</label>
+      <input type="text" id="sheet-copilot-prompt" placeholder="e.g. sum column C where column B is 'paid' or average salary" class="copilot-input" autocomplete="off">
+      <div class="copilot-actions">
+        <button type="button" class="btn small btn-primary" id="sheet-copilot-generate">Generate formula</button>
+        <button type="button" class="btn small" id="sheet-copilot-explain">Explain formula</button>
+      </div>
+      <div id="sheet-copilot-result" class="copilot-result" hidden>
+        <div class="copilot-formula mono" id="sheet-copilot-formula"></div>
+        <div class="copilot-explanation small" id="sheet-copilot-explanation"></div>
+        <button type="button" class="btn small btn-primary" id="sheet-copilot-insert">Insert into active cell</button>
+      </div>
     </div>
   </dialog>
 
@@ -338,6 +436,9 @@
             <option value="dl:html">Web page (.html)</option>
             <option value="dl:txt">Plain text (.txt)</option>
             <option value="pdf">PDF / Print…</option>
+          </optgroup>
+          <optgroup label="For AI &amp; Clipboard">
+            <option value="clip:md">Copy for AI (Markdown)</option>
           </optgroup>
           <optgroup label="Save a copy in this folder" data-copy-group>
             <option value="copy:docx" data-copy>as Word (.docx)</option>
@@ -378,6 +479,8 @@
       <button class="btn small" id="doc-align-right" type="button" title="Align right">→≡</button>
       <span class="sheet-sep"></span>
       <button class="btn small" id="doc-table" type="button" title="Insert table">Table</button>
+      <button class="btn small" id="doc-slash-btn" type="button" title="Insert blocks (Table, Callout, Task list, Code)">/ Insert</button>
+      <button class="btn small" id="doc-history-btn" type="button" title="Version history &amp; visual diff">History</button>
       <button class="btn small" id="doc-image" type="button" title="Insert picture">Picture</button>
       <input type="file" id="doc-image-input" accept="image/png,image/jpeg,image/gif,image/webp" hidden>
       <button class="btn small" id="doc-hr" type="button" title="Horizontal line">―</button>
@@ -390,6 +493,50 @@
     <div class="sheet-bottom doc-chrome">
       <span id="doc-stats" class="muted small mono"></span>
       <span class="muted small">Ctrl+S save · Ctrl+K link · Ctrl+P print</span>
+    </div>
+  </dialog>
+
+  <!-- RDocs: Visual Version History & Diff -->
+  <dialog id="doc-history-dialog" class="copilot-dialog" style="max-width: 640px;">
+    <div class="copilot-header">
+      <span class="copilot-title">⏱️ Document History &amp; Visual Diff</span>
+      <button type="button" class="btn small btn-ghost" id="doc-history-close">✕</button>
+    </div>
+    <div class="copilot-body">
+      <label class="small muted">Saved snapshots:</label>
+      <select id="doc-history-select" class="select-input"></select>
+      <div id="doc-diff-view" class="doc-diff-view"></div>
+      <div class="copilot-actions">
+        <button type="button" class="btn small btn-primary" id="doc-history-restore">Restore this version</button>
+      </div>
+    </div>
+  </dialog>
+
+  <!-- Photos: Google Photos-Style Lightbox -->
+  <dialog id="photos-lightbox" class="photos-lightbox">
+    <div class="lightbox-topbar">
+      <button class="btn small btn-ghost" id="lightbox-close" type="button">✕ Close</button>
+      <div class="lightbox-info" id="lightbox-info"></div>
+      <div class="lightbox-actions">
+        <a class="btn small btn-primary" id="lightbox-download" download>Download</a>
+      </div>
+    </div>
+    <div class="lightbox-stage">
+      <button class="lightbox-nav prev" id="lightbox-prev" type="button" aria-label="Previous photo">‹</button>
+      <div class="lightbox-content" id="lightbox-content"></div>
+      <button class="lightbox-nav next" id="lightbox-next" type="button" aria-label="Next photo">›</button>
+    </div>
+  </dialog>
+
+  <!-- Automations & Pipelines Dialog -->
+  <dialog id="watchers-dialog" class="copilot-dialog" style="max-width: 580px;">
+    <div class="copilot-header">
+      <span class="copilot-title">⚡ Automations &amp; Pipelines</span>
+      <button type="button" class="btn small btn-ghost" id="watchers-close">✕</button>
+    </div>
+    <div class="copilot-body">
+      <p class="small muted">Event-driven workflows that trigger when files are backed up or uploaded.</p>
+      <div class="watchers-list" id="watchers-list"></div>
     </div>
   </dialog>
 
@@ -411,18 +558,79 @@
       <section id="phone-section" hidden>
         <h3>This phone</h3>
         <div class="phone-actions">
-          <button class="phone-action" type="button" data-phone="autoUpload"><span data-icon="camera"></span><span><strong>Auto-upload a folder</strong><span class="muted small" id="phone-sync-status"></span></span></button>
-          <button class="phone-action" type="button" data-phone="uploadNow" id="phone-upload-now"><span data-icon="upload"></span><span><strong>Upload new photos now</strong></span></button>
-          <button class="phone-action" type="button" data-phone="stopAutoUpload" id="phone-stop"><span data-icon="trash"></span><span><strong>Stop auto-upload</strong></span></button>
-          <button class="phone-action" type="button" data-phone="checkForUpdates"><span data-icon="download"></span><span><strong>Check for updates</strong><span class="muted small" id="phone-version"></span></span></button>
-          <button class="phone-action" type="button" data-phone="changeAddress"><span data-icon="edit"></span><span><strong>Change drive address</strong></span></button>
+          <button class="phone-action" type="button" data-phone="autoUpload">
+            <span data-icon="cloud"></span>
+            <span>
+              <strong id="phone-backup-title">Cloud backup</strong>
+              <span class="muted small" id="phone-sync-status">Off · Tap to back up Camera or a folder to /Backups</span>
+            </span>
+          </button>
+          <button class="phone-action" type="button" data-phone="uploadNow" id="phone-upload-now">
+            <span data-icon="upload"></span>
+            <span><strong>Back up now</strong><span class="muted small">Sync new photos &amp; files immediately</span></span>
+          </button>
+          <button class="phone-action" type="button" data-phone="openBackups" id="phone-open-backups">
+            <span data-icon="folder"></span>
+            <span><strong>View backups on drive</strong><span class="muted small" id="phone-backup-path">/Backups</span></span>
+          </button>
+          <button class="phone-action" type="button" data-phone="stopAutoUpload" id="phone-stop">
+            <span data-icon="trash"></span>
+            <span><strong>Stop phone backup</strong></span>
+          </button>
+          <button class="phone-action" type="button" data-phone="checkForUpdates">
+            <span data-icon="download"></span>
+            <span><strong>Check for updates</strong><span class="muted small" id="phone-version"></span></span>
+          </button>
+          <button class="phone-action" type="button" data-phone="changeAddress">
+            <span data-icon="edit"></span>
+            <span><strong>Change drive address</strong></span>
+          </button>
+        </div>
+      </section>
+      <section id="automations-section">
+        <h3>Automations</h3>
+        <div class="phone-actions">
+          <button class="phone-action" type="button" id="open-watchers-btn">
+            <span data-icon="settings"></span>
+            <span>
+              <strong>Automations &amp; Pipelines</strong>
+              <span class="muted small" id="watchers-summary">Smart OCR, Auto-Expenses &amp; Backups</span>
+            </span>
+          </button>
         </div>
       </section>
       <section>
         <div class="section-head">
           <h3>Signed-in devices</h3>
-          <button class="btn small btn-danger" id="revoke-others">Sign out all others</button>
+          <div class="row-actions">
+            <button class="btn small btn-primary" id="pair-open-btn" type="button">+ Connect a device</button>
+            <button class="btn small btn-danger" id="revoke-others">Sign out all others</button>
+          </div>
         </div>
+
+        <div id="pair-box" class="sync-code" hidden>
+          <div class="section-head">
+            <strong>Connect another device</strong>
+            <button class="btn btn-ghost small" id="pair-close-btn" type="button">Close</button>
+          </div>
+          <p class="muted small">Scan with your phone camera or open the link on another device to sign in instantly without entering your password:</p>
+          <div id="pair-qr" class="pair-qr-wrap"></div>
+          <div class="row-actions pair-row">
+            <input id="pair-link-input" class="mono small grow" readonly>
+            <button class="btn small" id="pair-link-copy" type="button">Copy link</button>
+          </div>
+          <p class="muted small" id="pair-timer"></p>
+
+          <hr class="pair-divider">
+
+          <strong>Or approve a code from another device:</strong>
+          <form id="pair-approve-form" class="row-actions pair-row">
+            <input name="code" placeholder="e.g. ABCD-1234" maxlength="9" autocomplete="off" spellcheck="false" autocapitalize="characters" class="mono grow" required>
+            <button class="btn btn-primary small" type="submit">Approve</button>
+          </form>
+          <p id="pair-approve-error" class="error"></p>
+        </div>
+
         <ul id="device-list" class="device-list"></ul>
       </section>
       <section>
@@ -435,10 +643,61 @@
       </section>
       <section>
         <div class="section-head">
-          <h3>AI Agents (MCP Server)</h3>
-          <button class="btn small" id="mcp-new-btn" type="button">New agent token…</button>
+          <h3>AI Agents &amp; Assistants</h3>
+          <div class="row-actions">
+            <button class="btn small btn-primary" id="ai-quick-connect-btn" type="button">Connect an AI…</button>
+            <button class="btn small" id="mcp-new-btn" type="button">New agent token…</button>
+          </div>
         </div>
-        <p class="muted small">Give an AI agent (Claude, Antigravity, Cursor) scoped access to <strong>only your personal drive</strong> (or a single folder inside it) over the Model Context Protocol (<code class="mono">/mcp</code>).</p>
+        <p class="muted small">Give Claude, Cursor, Antigravity, or other AI assistants secure access to read and write your files and RDocs documents over MCP or direct Markdown links.</p>
+
+        <div id="ai-connect-card" class="sync-code" hidden>
+          <div class="section-head">
+            <strong>One-click AI Connect</strong>
+            <button class="btn btn-ghost small" id="ai-connect-close" type="button">Close</button>
+          </div>
+          <div id="ai-connect-step1">
+            <p class="muted small">What should the AI be allowed to do? This makes a key that works for 90 days; you can revoke it below any time.</p>
+            <div class="row-actions ai-choices">
+              <button class="btn small btn-primary" type="button" data-ai-scope="write">Read and edit my files</button>
+              <button class="btn small" type="button" data-ai-scope="read">Only read</button>
+            </div>
+          </div>
+          <div id="ai-tab-content-wrap" hidden>
+          <p class="muted small">Pick your tool and copy its setup. The key is only shown here, once.</p>
+          <div class="row-actions ai-choices">
+            <button class="btn small active" id="ai-tab-claude-code" type="button">Claude Code</button>
+            <button class="btn small" id="ai-tab-claude-desktop" type="button">Claude Desktop</button>
+            <button class="btn small" id="ai-tab-cursor" type="button">Cursor</button>
+            <button class="btn small" id="ai-tab-llms" type="button">Any other AI</button>
+          </div>
+          <div id="ai-tab-content">
+            <div id="ai-pane-claude-code">
+              <p class="small muted">Run this command in your terminal:</p>
+              <pre class="mono chip ai-snippet" id="ai-claude-code-cmd"></pre>
+              <button class="btn small" id="ai-copy-claude-code" type="button">Copy command</button>
+            </div>
+            <div id="ai-pane-claude-desktop" hidden>
+              <p class="small muted">Add to your <code class="mono">claude_desktop_config.json</code>:</p>
+              <pre class="mono chip ai-snippet" id="ai-claude-desktop-cfg"></pre>
+              <button class="btn small" id="ai-copy-claude-desktop" type="button">Copy JSON</button>
+            </div>
+            <div id="ai-pane-cursor" hidden>
+              <p class="small muted">Add to your project's <code class="mono">.cursor/mcp.json</code>:</p>
+              <pre class="mono chip ai-snippet" id="ai-cursor-cfg"></pre>
+              <button class="btn small" id="ai-copy-cursor" type="button">Copy Cursor config</button>
+            </div>
+            <div id="ai-pane-llms" hidden>
+              <p class="small muted">Paste these instructions into any AI chat. They point it at the plain-English guide, <a href="/llms.txt" target="_blank" class="mono">/llms.txt</a>, which lists everything it can do:</p>
+              <div class="row-actions pair-row">
+                <code class="mono chip" id="ai-llms-url"></code>
+                <button class="btn small" id="ai-copy-llms" type="button">Copy instructions for the AI</button>
+              </div>
+            </div>
+          </div>
+          </div>
+        </div>
+
         <form id="mcp-token-form" class="password-form" hidden>
           <label>Agent label<input name="label" placeholder="e.g. Claude Desktop" required></label>
           <label>Permissions
@@ -514,6 +773,201 @@
         </form>
       </section>
     </div>
+  </dialog>
+
+  <!-- File Details & Mobile QR Inspector -->
+  <dialog id="details-dialog" class="details-dialog">
+    <div class="dialog-head">
+      <strong>File Details &amp; Mobile Access</strong>
+      <button class="btn small btn-ghost" id="details-close" type="button">✕</button>
+    </div>
+    <div class="details-body" id="details-body">
+      <div class="details-hero">
+        <div class="details-icon" id="details-icon"></div>
+        <div class="details-hero-text">
+          <strong id="details-filename">filename.ext</strong>
+          <span class="muted small" id="details-path">/path/to/file</span>
+        </div>
+      </div>
+      <div class="details-grid">
+        <div class="details-stat">
+          <span class="muted small">Kind</span>
+          <strong id="details-kind">Document</strong>
+        </div>
+        <div class="details-stat">
+          <span class="muted small">Size</span>
+          <strong id="details-size">0 KB</strong>
+        </div>
+        <div class="details-stat">
+          <span class="muted small">Modified</span>
+          <strong id="details-modified">-</strong>
+        </div>
+        <div class="details-stat">
+          <span class="muted small">Starred</span>
+          <strong id="details-starred">No</strong>
+        </div>
+      </div>
+      <div class="details-qr-box">
+        <span class="muted small">Scan with phone to open instantly:</span>
+        <div id="details-qrcode" class="details-qrcode"></div>
+      </div>
+      <div class="row-actions details-actions">
+        <button class="btn small btn-primary" id="details-open-btn" type="button">Open</button>
+        <button class="btn small" id="details-star-btn" type="button">Star</button>
+        <a class="btn small" id="details-download-btn" download>Download</a>
+        <button class="btn small" id="details-share-btn" type="button">Share link</button>
+      </div>
+    </div>
+  </dialog>
+
+  <!-- Persistent Floating Audio Player Dock -->
+  <div id="audio-dock" class="audio-dock" hidden>
+    <div class="audio-dock-info">
+      <span class="audio-dock-icon" data-icon="media"></span>
+      <div class="audio-dock-text">
+        <strong id="audio-dock-title">Audio Track</strong>
+        <span class="muted small" id="audio-dock-time">0:00 / 0:00</span>
+      </div>
+    </div>
+    <div class="audio-dock-controls">
+      <button class="btn btn-ghost icon-only" id="audio-dock-play" type="button" aria-label="Play or Pause">
+        <span id="audio-dock-play-label">▶</span>
+      </button>
+      <input type="range" id="audio-dock-seek" min="0" max="100" value="0" step="0.1">
+      <button class="btn btn-ghost icon-only" id="audio-dock-close" type="button" aria-label="Close Player">✕</button>
+    </div>
+    <audio id="audio-dock-element" preload="metadata"></audio>
+  </div>
+
+  <!-- 1. Encrypted Private Vault ("Secure Folder") Dialog -->
+  <dialog id="vault-dialog" class="account">
+    <div class="preview-head">
+      <strong>🔒 Private Vault</strong>
+      <button class="btn btn-ghost" id="vault-close">Close</button>
+    </div>
+    <div class="account-body">
+      <div id="vault-setup-view" hidden>
+        <p class="muted">Protect your private files with a dedicated master PIN. Files inside <code class="mono">/Vault</code> will stay encrypted and invisible until unlocked.</p>
+        <form id="vault-setup-form" class="password-form">
+          <label>Create Vault PIN (4-32 digits or chars)<input id="vault-setup-pin" type="password" autocomplete="new-password" minlength="4" required></label>
+          <label>Confirm PIN<input id="vault-setup-confirm" type="password" autocomplete="new-password" minlength="4" required></label>
+          <p id="vault-setup-error" class="error"></p>
+          <button class="btn btn-primary" type="submit">Create Vault</button>
+        </form>
+      </div>
+      <div id="vault-unlock-view" hidden>
+        <p class="muted">Enter your Vault PIN to unlock your private documents and photos.</p>
+        <form id="vault-unlock-form" class="password-form">
+          <label>Vault PIN<input id="vault-unlock-pin" type="password" autocomplete="current-password" autofocus required></label>
+          <p id="vault-unlock-error" class="error"></p>
+          <div class="row-actions">
+            <button class="btn btn-primary" type="submit">Unlock Vault</button>
+            <button class="btn btn-ghost" id="vault-lock-btn" type="button">Lock Now</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </dialog>
+
+  <!-- 2. Voice Memo & Audio Recorder Dialog -->
+  <dialog id="voice-memo-dialog" class="voice-memo-dialog">
+    <div class="dialog-head">
+      <strong>🎙️ Record Voice Memo</strong>
+      <button class="btn small btn-ghost" id="voice-memo-close" type="button">✕</button>
+    </div>
+    <div class="voice-memo-body">
+      <div class="voice-waveform-wrap">
+        <canvas id="voice-memo-canvas" width="340" height="90"></canvas>
+      </div>
+      <div class="voice-timer" id="voice-memo-timer">00:00</div>
+      <div class="voice-controls">
+        <button class="btn btn-danger voice-record-btn" id="voice-record-btn" type="button">Start Recording</button>
+        <button class="btn btn-primary" id="voice-save-btn" type="button" hidden>Save to Drive</button>
+        <button class="btn btn-ghost" id="voice-discard-btn" type="button" hidden>Discard</button>
+      </div>
+    </div>
+  </dialog>
+
+  <!-- 3. Storage Breakdown & Duplicate Cleaner Dialog -->
+  <dialog id="storage-dialog" class="account storage-dialog">
+    <div class="preview-head">
+      <strong>🧹 Storage Analytics &amp; Cleaner</strong>
+      <button class="btn btn-ghost" id="storage-close">Close</button>
+    </div>
+    <div class="account-body">
+      <section>
+        <div class="storage-summary-bar" id="storage-bar"></div>
+        <div class="storage-legend" id="storage-legend"></div>
+      </section>
+      <section>
+        <div class="section-head">
+          <h3>Duplicate Files</h3>
+          <button class="btn small btn-danger" id="clean-duplicates-btn" hidden>Clean All Duplicates</button>
+        </div>
+        <div id="storage-duplicates-list" class="storage-list">
+          <p class="muted small">Scanning for duplicates…</p>
+        </div>
+      </section>
+      <section>
+        <h3>Large Files (&gt; 10 MB)</h3>
+        <div id="storage-large-list" class="storage-list"></div>
+      </section>
+    </div>
+  </dialog>
+
+  <!-- 4. Quick Code & Config Editor Dialog -->
+  <dialog id="code-editor-dialog" class="code-editor-dialog">
+    <div class="code-editor-head">
+      <div class="code-editor-title-wrap">
+        <strong id="code-editor-title">filename.js</strong>
+        <span class="muted small" id="code-editor-status">Ready</span>
+      </div>
+      <div class="code-editor-actions">
+        <button class="btn small btn-primary" id="code-editor-save" type="button">Save (Ctrl+S)</button>
+        <button class="btn small btn-ghost" id="code-editor-close" type="button">Close</button>
+      </div>
+    </div>
+    <div class="code-editor-wrap">
+      <textarea id="code-editor-content" spellcheck="false" class="code-editor-area"></textarea>
+    </div>
+  </dialog>
+
+  <!-- 5. Xod AI Agent Copilot & Model Harness -->
+  <dialog id="xod-dialog" class="xod-dialog">
+    <div class="xod-head">
+      <div class="xod-title-wrap">
+        <span class="xod-icon">🔮</span>
+        <div>
+          <strong>Xod AI Agent</strong>
+          <div class="xod-status-line">
+            <span class="chip chip-success small" id="xod-status-chip">● Connected</span>
+            <span class="muted small" id="xod-active-model">Checking engine…</span>
+          </div>
+        </div>
+      </div>
+      <div class="xod-head-actions">
+        <select id="xod-model-select" class="select-input small" title="Switch model"></select>
+        <button class="btn small btn-ghost" id="xod-close" type="button">✕</button>
+      </div>
+    </div>
+    <div class="xod-quick-chips" id="xod-quick-chips">
+      <button class="chip xod-chip" data-prompt="Analyze storage breakdown and check for duplicate files">🧹 Clean Space</button>
+      <button class="chip xod-chip" data-prompt="Summarize my recent files and photos">📊 Drive Summary</button>
+      <button class="chip xod-chip" data-prompt="Create a project planning document in /Docs/Plan.rdoc">📝 Draft Plan RDoc</button>
+      <button class="chip xod-chip" data-prompt="Create a monthly budget sheet in /Budget.rsheet">📈 Budget Sheet</button>
+      <button class="chip xod-chip" data-prompt="Check my encrypted vault status">🔒 Vault Status</button>
+    </div>
+    <div class="xod-body" id="xod-messages">
+      <div class="xod-msg xod-msg-assistant">
+        <div class="xod-bubble">
+          👋 Hi! I'm <strong>Xod</strong>, your private AI agent running directly on your computer. I can manage, search, clean, create documents, build spreadsheets, and control your entire RDrive from here or your phone. How can I help?
+        </div>
+      </div>
+    </div>
+    <form class="xod-input-bar" id="xod-form">
+      <input id="xod-input" type="text" placeholder="Ask Xod to organize, write, or control RDrive…" autocomplete="off" required>
+      <button class="btn btn-primary" id="xod-send-btn" type="submit">Send</button>
+    </form>
   </dialog>
 
   <div id="toast" class="toast" role="status" hidden></div>

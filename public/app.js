@@ -5,9 +5,11 @@ const $ = (sel) => document.querySelector(sel);
 const state = {
   user: null,
   path: '/',
-  view: 'drive', // 'drive' | 'trash' | 'search'
+  view: 'drive', // 'drive' | 'trash' | 'search' | 'photos' | 'starred'
   searchQuery: '',
   entries: [],
+  starred: new Set(),
+  vaultToken: null,
   selected: new Set(),
   menuTarget: null,
 };
@@ -16,6 +18,7 @@ const state = {
 
 async function api(method, url, body) {
   const opts = { method, headers: { 'X-Rdrive': '1' }, credentials: 'same-origin' };
+  if (state.vaultToken) opts.headers['X-Rdrive-Vault'] = state.vaultToken;
   if (body !== undefined) {
     opts.headers['Content-Type'] = 'application/json';
     opts.body = JSON.stringify(body);
@@ -79,6 +82,7 @@ async function copyText(text, label = 'Copied to clipboard.') {
     prompt('Copy this address:', text);
   }
 }
+window.rdriveCopy = copyText;
 
 function extOf(name) {
   return String(name || '').split('.').pop().toLowerCase();
@@ -161,6 +165,12 @@ const UI_ICONS = {
   edit: 'M4.5 19.5h4l10-10-4-4-10 10zM13 7l4 4',
   move: 'M4 7.5A2.5 2.5 0 0 1 6.5 5H9l2 2h6.5A2.5 2.5 0 0 1 20 9.5v7a2.5 2.5 0 0 1-2.5 2.5h-11A2.5 2.5 0 0 1 4 16.5zM9.5 13h6M13 10.5l2.5 2.5-2.5 2.5',
   more: 'M6 12h.01M12 12h.01M18 12h.01',
+  cloud: 'M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z',
+  star: 'M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z',
+  info: 'M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20zM12 16v-4M12 8h.01',
+  lock: 'M17 11V7a5 5 0 0 0-10 0v4H5a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7a2 2 0 0 0-2-2h-2zM9 7a3 3 0 0 1 6 0v4H9V7z',
+  backup: 'M12 18v-8m-4 4 4-4 4 4M20 16.58A5 5 0 0 0 18 7h-1.26A8 8 0 1 0 4 15.25',
+  phone: 'M7 4.5h10a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2v-11a2 2 0 0 1 2-2zM11 17.5h2',
 };
 
 function uiIcon(name) {
@@ -195,10 +205,13 @@ const KINDS = {
   media: ['mp4', 'webm', 'mov', 'm4v', 'mp3', 'wav', 'ogg', 'm4a', 'flac'],
   note: ['txt', 'md', 'markdown', 'log', 'json', 'html', 'htm'],
 };
-const KIND_LABEL = { folder: 'Folder', doc: 'Doc', sheet: 'Sheet', image: 'Photo', pdf: 'PDF', media: 'Media', note: 'Note', file: 'File' };
+const KIND_LABEL = { folder: 'Folder', backup: 'Backup', doc: 'Doc', sheet: 'Sheet', image: 'Photo', pdf: 'PDF', media: 'Media', note: 'Note', file: 'File' };
 
 function kindOf(entry) {
-  if (entry.type === 'folder') return 'folder';
+  if (entry.type === 'folder') {
+    if (entry.name.toLowerCase() === 'backups' || (state.path && state.path.startsWith('/Backups'))) return 'backup';
+    return 'folder';
+  }
   const ext = extOf(entry.name);
   return Object.keys(KINDS).find((k) => KINDS[k].includes(ext)) || 'file';
 }
@@ -276,7 +289,13 @@ function showAuth(status = serverStatus) {
   $('#drive-view').hidden = true;
   $('#public-share-view').hidden = true;
   $('#auth-view').hidden = false;
+  $('#auth-form').hidden = false;
+  $('#pair-request-card').hidden = true;
+  $('#pair-claim-card').hidden = true;
+  if (pairPollInterval) clearInterval(pairPollInterval);
+  pairPollInterval = null;
   const setup = status && status.needsSetup;
+  $('#auth-pair-opt').hidden = !!setup;
   $('#sso').hidden = !(status && status.github) || setup;
   authMode = setup ? 'setup' : 'login';
   const form = $('#auth-form');
@@ -331,7 +350,8 @@ $('#logout').addEventListener('click', async () => {
 // ---------- drive, search & trash ----------
 
 function pathFromHash() {
-  const raw = location.hash.replace(/^#/, '') || '/';
+  if (!location.hash || !location.hash.startsWith('#/')) return '/';
+  const raw = location.hash.slice(2) || '/';
   try {
     return '/' + raw.split('/').filter(Boolean).map(decodeURIComponent).join('/');
   } catch {
@@ -349,6 +369,7 @@ function navigate(p) {
 }
 
 function showDrive() {
+  console.log('[RDrive] showDrive() called, location.hash=' + location.hash);
   $('#auth-view').hidden = true;
   $('#public-share-view').hidden = true;
   $('#drive-view').hidden = false;
@@ -357,12 +378,18 @@ function showDrive() {
   const initial = Object.assign(document.createElement('span'), { className: 'initial', textContent: state.user.slice(0, 1) });
   $('#whoami').replaceChildren(full, initial);
   $('#whoami').setAttribute('aria-label', `Account: ${state.user}`);
-  load();
+  if (location.hash === '#photos') loadPhotos('all');
+  else if (location.hash === '#starred') loadStarred();
+  else if (location.hash === '#xod') { load(); openXodDialog(); }
+  else load();
   refreshUsage();
 }
 
 async function load() {
   state.selected.clear();
+  $('#photos-view').hidden = true;
+  $('#listing').hidden = false;
+  console.log('[RDrive] load() start, path=' + state.path + ' hash=' + location.hash);
   setNav(state.view === 'trash' ? 'trash' : state.view === 'search' ? 'search' : 'files');
   $('#drive-actions').hidden = state.view === 'trash';
   $('#trash-actions').hidden = state.view !== 'trash';
@@ -381,6 +408,10 @@ async function load() {
     return;
   }
 
+  if (state.view === 'starred') {
+    return loadStarred();
+  }
+
   if (state.view === 'search' && state.searchQuery) {
     try {
       const data = await api('GET', `/api/search?q=${encodeURIComponent(state.searchQuery)}`);
@@ -395,15 +426,20 @@ async function load() {
 
   state.view = 'drive';
   state.path = pathFromHash();
+  console.log('[RDrive] fetching /api/list for path=' + state.path);
   try {
     const data = await api('GET', `/api/list?path=${encodeURIComponent(state.path)}`);
+    console.log('[RDrive] /api/list SUCCESS, entries=' + (data.entries ? data.entries.length : 'none'));
     state.entries = data.entries;
+    if (Array.isArray(data.starred)) state.starred = new Set(data.starred);
   } catch (ex) {
+    console.log('[RDrive] /api/list ERROR: ' + ex.message);
     if (!state.user) return;
     toast(ex.message);
     if (state.path !== '/') return navigate('/');
     state.entries = [];
   }
+  console.log('[RDrive] calling render(), entries count=' + state.entries.length);
   render();
 }
 
@@ -483,6 +519,42 @@ function renderCrumbs(container, p, onClick, dropTargets) {
   });
 }
 
+function starButton(targetPath) {
+  const isStarred = state.starred && state.starred.has(targetPath);
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = `star-btn ${isStarred ? 'active' : ''}`;
+  btn.title = isStarred ? 'Unstar' : 'Star';
+  btn.appendChild(uiIcon('star'));
+  btn.addEventListener('click', async (e) => {
+    e.stopPropagation();
+    await toggleStarPath(targetPath);
+    const nowStarred = state.starred.has(targetPath);
+    btn.classList.toggle('active', nowStarred);
+    btn.title = nowStarred ? 'Unstar' : 'Star';
+    if (state.view === 'starred' && !nowStarred) loadStarred();
+  });
+  return btn;
+}
+
+function haptic(ms = 12) {
+  try {
+    if (window.RDriveApp && window.RDriveApp.vibrate) window.RDriveApp.vibrate(ms);
+    else if (navigator.vibrate) navigator.vibrate(ms);
+  } catch {}
+}
+
+async function toggleStarPath(targetPath) {
+  try {
+    const res = await api('POST', '/api/starred/toggle', { path: targetPath });
+    if (res.starred) state.starred.add(targetPath);
+    else state.starred.delete(targetPath);
+    haptic(15);
+  } catch (err) {
+    toast(err.message);
+  }
+}
+
 function render() {
   renderCrumbs($('#crumbs'), state.path, navigate, true);
   $('#select-all').disabled = false;
@@ -511,6 +583,7 @@ function render() {
     const name = document.createElement('span');
     name.className = 'cell-name';
     name.appendChild(fileTile(entry, p));
+    name.appendChild(starButton(entry.path || p));
     const link = document.createElement('a');
     link.className = 'name';
     link.textContent = entry.name;
@@ -602,7 +675,13 @@ function renderSearch() {
     const loc = document.createElement('span');
     loc.className = 'muted small';
     loc.textContent = entry.dir === '/' ? '' : `in ${entry.dir}`;
-    name.append(nameBlock(link, `${metaLine(entry)} · ${entry.dir === '/' ? 'My Drive' : `in ${entry.dir}`}`), loc);
+    let metaText = `${metaLine(entry)} · ${entry.dir === '/' ? 'My Drive' : `in ${entry.dir}`}`;
+    if (entry.matchType === 'ocr') {
+      metaText = `📸 ${entry.snippet} · ${metaText}`;
+    } else if (entry.matchType === 'document') {
+      metaText = `📄 "${entry.snippet}" · ${metaText}`;
+    }
+    name.append(nameBlock(link, metaText), loc);
 
     const size = document.createElement('span');
     size.className = 'cell-size';
@@ -800,13 +879,20 @@ document.addEventListener('keydown', (e) => {
 
 function openEntry(entry, baseDir = state.path) {
   const p = entry.path || joinPath(baseDir, entry.name);
+  if (entry.isVault || (entry.name === 'Vault' && entry.locked)) {
+    return openVaultDialog();
+  }
   if (entry.type === 'folder') return navigate(p);
+  const ext = entry.name.split('.').pop().toLowerCase();
+  const CODE_EXTS = ['js', 'json', 'py', 'sh', 'css', 'html', 'sql', 'yml', 'yaml', 'env', 'txt', 'md', 'toml', 'ts', 'jsx', 'tsx', 'xml', 'log', 'conf', 'ini'];
+  if (CODE_EXTS.includes(ext)) return openCodeEditor(entry.name, p);
   const kind = previewKind(entry.name);
   if (kind === 'sheet') return openSpreadsheet(entry.name, p);
   if (kind === 'doc') return openDocument(entry.name, p);
   if (kind === 'officeDoc') return viewOfficeDocument(entry.name, p);
   if (kind === 'officeSheet') return viewOfficeSpreadsheet(entry.name, p);
-  if (kind === 'pdf') return window.open(downloadUrl(p, true), '_blank', 'noopener');
+  if (kind === 'audio') return playAudioDock(entry.name, p);
+  if (kind === 'pdf') return preview(entry.name, p, 'pdf');
   if (kind) return preview(entry.name, p, kind);
   download(p);
 }
@@ -1015,6 +1101,13 @@ async function preview(name, p, kind) {
     el.controls = true;
     el.autoplay = true;
     el.src = downloadUrl(p, true);
+  } else if (kind === 'pdf') {
+    el = document.createElement('iframe');
+    el.src = downloadUrl(p, true);
+    el.style.width = '100%';
+    el.style.height = '78vh';
+    el.style.border = 'none';
+    el.style.borderRadius = '8px';
   } else {
     el = document.createElement('pre');
     el.textContent = 'Loading…';
@@ -1226,6 +1319,14 @@ async function renderShareList() {
       s.hasPassword ? 'Password protected' : 'Public link',
       s.allowEdit ? 'Anyone with the link can edit' : 'View / download',
     ];
+    if (s.maxDownloads > 0) {
+      parts.push(`${s.downloads || 0}/${s.maxDownloads} downloads`);
+    } else if (s.downloads) {
+      parts.push(`${s.downloads} downloads`);
+    }
+    if (s.views) {
+      parts.push(`${s.views} views`);
+    }
     meta.textContent = parts.join(' · ');
     info.append(title, meta);
     const actions = document.createElement('div');
@@ -1235,6 +1336,18 @@ async function renderShareList() {
     copyBtn.className = 'btn small';
     copyBtn.textContent = 'Copy';
     copyBtn.addEventListener('click', () => copyText(fullUrl, 'Share link copied!'));
+    actions.append(copyBtn);
+
+    if (currentSharePath && currentSharePath.toLowerCase().endsWith('.rdoc')) {
+      const copyMdBtn = document.createElement('button');
+      copyMdBtn.type = 'button';
+      copyMdBtn.className = 'btn small';
+      copyMdBtn.textContent = 'Copy for AI (.md)';
+      copyMdBtn.title = 'Copy direct Markdown link for AI assistants';
+      copyMdBtn.addEventListener('click', () => copyText(`${location.origin}/s/${s.id}.md`, 'AI Markdown link copied!'));
+      actions.append(copyMdBtn);
+    }
+
     const revokeBtn = document.createElement('button');
     revokeBtn.type = 'button';
     revokeBtn.className = 'btn small btn-danger';
@@ -1248,7 +1361,7 @@ async function renderShareList() {
         toast(ex.message);
       }
     });
-    actions.append(copyBtn, revokeBtn);
+    actions.append(revokeBtn);
     li.append(info, actions);
     list.appendChild(li);
   }
@@ -1264,6 +1377,7 @@ $('#share-form').addEventListener('submit', async (e) => {
       expiresInHours: Number(f.expiresInHours.value),
       password: f.password.value,
       allowEdit: f.allowEdit.checked,
+      maxDownloads: Number(f.maxDownloads ? f.maxDownloads.value : 0),
     });
     f.password.value = '';
     const fullUrl = location.origin + share.url;
@@ -1282,6 +1396,9 @@ function openMenu(entry, anchor, x, y) {
   const menu = $('#menu');
   state.menuTarget = entry;
   $('#menu-download').querySelector('.label').textContent = entry.type === 'folder' ? 'Download .zip' : 'Download';
+  const isStarred = state.starred && state.starred.has(entry.path || joinPath(entry.dir || state.path, entry.name));
+  const starLabel = $('#menu-star')?.querySelector('.label');
+  if (starLabel) starLabel.textContent = isStarred ? 'Unstar' : 'Star';
   const ext = extOf(entry.name);
   const convert = $('#menu-convert');
   convert.hidden = entry.type === 'folder' || !(TO_RDOC.includes(ext) || TO_RSHEET.includes(ext));
@@ -1328,11 +1445,13 @@ $('#new-menu').addEventListener('click', (e) => {
   if (!item) return;
   closeMenu();
   const what = item.dataset.new;
+  if (what === 'scan') $('#scanner-input').click();
   if (what === 'doc') createNewDocument();
   if (what === 'sheet') createNewSpreadsheet();
   if (what === 'folder') $('#new-folder').click();
   if (what === 'upload') $('#file-input').click();
   if (what === 'camera') $('#camera-input').click();
+  if (what === 'voice') openVoiceMemoDialog();
   if (what === 'zip') download(state.path, true);
 });
 
@@ -1343,7 +1462,13 @@ $('#camera-input').addEventListener('change', (e) => {
 
 function setNav(which) {
   for (const b of document.querySelectorAll('#bottom-nav [data-nav]')) b.classList.toggle('active', b.dataset.nav === which);
-  $('#fab').hidden = which === 'trash';
+  $('#fab').hidden = which === 'trash' || which === 'photos';
+  $('#photos-btn').classList.toggle('btn-primary', which === 'photos');
+  $('#photos-btn').classList.toggle('btn-ghost', which !== 'photos');
+  $('#starred-btn').classList.toggle('btn-primary', which === 'starred');
+  $('#starred-btn').classList.toggle('btn-ghost', which !== 'starred');
+  $('#trash-btn').classList.toggle('btn-primary', which === 'trash');
+  $('#trash-btn').classList.toggle('btn-ghost', which !== 'trash');
 }
 
 $('#bottom-nav').addEventListener('click', (e) => {
@@ -1357,6 +1482,16 @@ $('#bottom-nav').addEventListener('click', (e) => {
     setNav('files');
     if (location.hash === '#/' || !location.hash) load();
     else navigate('/');
+  } else if (nav === 'photos') {
+    $('#search-input').value = '';
+    state.searchQuery = '';
+    loadPhotos('all');
+  } else if (nav === 'starred') {
+    $('#search-input').value = '';
+    state.searchQuery = '';
+    loadStarred();
+  } else if (nav === 'xod') {
+    openXodDialog();
   } else if (nav === 'search') {
     setNav('search');
     window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -1372,18 +1507,196 @@ $('#bottom-nav').addEventListener('click', (e) => {
   }
 });
 
+$('#photos-btn').addEventListener('click', () => {
+  $('#search-input').value = '';
+  state.searchQuery = '';
+  loadPhotos('all');
+});
+
+$('#starred-btn').addEventListener('click', () => {
+  $('#search-input').value = '';
+  state.searchQuery = '';
+  loadStarred();
+});
+
+$('#xod-btn').addEventListener('click', () => {
+  openXodDialog();
+});
+
+let currentPhotoItems = [];
+let currentPhotoIndex = 0;
+
+async function loadPhotos(filter = 'all') {
+  state.view = 'photos';
+  setNav('photos');
+  $('#listing').hidden = true;
+  $('#photos-view').hidden = false;
+  $('#drive-actions').hidden = true;
+  $('#trash-actions').hidden = true;
+  $('#crumbs').innerHTML = '<span><a href="#/">My Drive</a></span><span class="crumb-sep">/</span><span>Photos &amp; Media</span>';
+
+  for (const btn of document.querySelectorAll('.photos-filters .btn')) {
+    btn.classList.toggle('active', btn.id === `photos-filter-${filter}`);
+  }
+
+  $('#photos-stats').textContent = 'Loading timeline...';
+  try {
+    const data = await api('GET', `/api/photos/timeline?filter=${encodeURIComponent(filter)}`);
+    const timeline = $('#photos-timeline');
+    timeline.replaceChildren();
+
+    const groups = data.groups || [];
+    currentPhotoItems = [];
+
+    $('#photos-empty').hidden = groups.length > 0;
+    $('#photos-stats').textContent = `${data.stats.totalMedia} items (${data.stats.photosCount} photos, ${data.stats.videosCount} videos)`;
+
+    for (const group of groups) {
+      const gEl = document.createElement('div');
+      gEl.className = 'photos-group';
+
+      const title = document.createElement('div');
+      title.className = 'photos-group-title';
+      title.textContent = `${group.title} · ${group.items.length}`;
+      gEl.appendChild(title);
+
+      const grid = document.createElement('div');
+      grid.className = 'photos-grid';
+
+      for (const item of group.items) {
+        const itemIdx = currentPhotoItems.length;
+        currentPhotoItems.push(item);
+
+        const card = document.createElement('div');
+        card.className = 'photo-card';
+
+        const img = document.createElement('img');
+        img.className = 'photo-thumb';
+        img.loading = 'lazy';
+        img.alt = item.name;
+        img.src = `/api/download?path=${encodeURIComponent(item.path)}&inline=1`;
+
+        card.appendChild(img);
+
+        if (item.isVideo) {
+          const vBadge = document.createElement('span');
+          vBadge.className = 'video-badge';
+          vBadge.textContent = '▶ Video';
+          card.appendChild(vBadge);
+        }
+
+        if (item.device) {
+          const dBadge = document.createElement('span');
+          dBadge.className = 'device-badge';
+          dBadge.textContent = item.device;
+          card.appendChild(dBadge);
+        }
+
+        card.addEventListener('click', () => openLightbox(itemIdx));
+        grid.appendChild(card);
+      }
+      gEl.appendChild(grid);
+      timeline.appendChild(gEl);
+    }
+  } catch (err) {
+    toast(err.message || 'Could not load media timeline.');
+  }
+}
+
+function openLightbox(idx) {
+  if (idx < 0 || idx >= currentPhotoItems.length) return;
+  currentPhotoIndex = idx;
+  const item = currentPhotoItems[idx];
+  const dlg = $('#photos-lightbox');
+  const stage = $('#lightbox-content');
+  const info = $('#lightbox-info');
+  const dl = $('#lightbox-download');
+
+  stage.replaceChildren();
+  info.innerHTML = `<strong>${escapeHtml(item.name)}</strong> · ${formatSize(item.size)}${item.device ? ` · <em>${escapeHtml(item.device)}</em>` : ''}`;
+  const fileUrl = `/api/download?path=${encodeURIComponent(item.path)}&inline=1`;
+  dl.href = fileUrl;
+
+  if (item.isVideo) {
+    const video = document.createElement('video');
+    video.src = fileUrl;
+    video.controls = true;
+    video.autoplay = true;
+    stage.appendChild(video);
+  } else {
+    const img = document.createElement('img');
+    img.src = fileUrl;
+    stage.appendChild(img);
+  }
+
+  dlg.showModal();
+}
+
+$('#lightbox-close').addEventListener('click', () => $('#photos-lightbox').close());
+$('#lightbox-prev').addEventListener('click', () => openLightbox(currentPhotoIndex - 1));
+$('#lightbox-next').addEventListener('click', () => openLightbox(currentPhotoIndex + 1));
+document.addEventListener('keydown', (e) => {
+  if ($('#photos-lightbox').open) {
+    if (e.key === 'ArrowLeft') openLightbox(currentPhotoIndex - 1);
+    if (e.key === 'ArrowRight') openLightbox(currentPhotoIndex + 1);
+  }
+});
+
+$('#photos-filter-all').addEventListener('click', () => loadPhotos('all'));
+$('#photos-filter-backups').addEventListener('click', () => loadPhotos('backups'));
+$('#photos-filter-videos').addEventListener('click', () => loadPhotos('videos'));
+
+$('#open-watchers-btn').addEventListener('click', async () => {
+  const dlg = $('#watchers-dialog');
+  const list = $('#watchers-list');
+  list.innerHTML = '<div class="muted small">Loading pipelines...</div>';
+  dlg.showModal();
+  try {
+    const data = await api('GET', '/api/watchers');
+    list.replaceChildren();
+    for (const w of data.watchers || []) {
+      const card = document.createElement('div');
+      card.className = 'watcher-card';
+      card.innerHTML = `
+        <div class="watcher-info">
+          <strong>${escapeHtml(w.name)}</strong>
+          <span class="muted small">${escapeHtml(w.description || '')} (${escapeHtml(w.pattern)})</span>
+        </div>
+        <button class="btn small ${w.enabled ? 'btn-primary' : 'btn-ghost'}" type="button">${w.enabled ? 'Enabled' : 'Disabled'}</button>
+      `;
+      const btn = card.querySelector('button');
+      btn.onclick = async () => {
+        btn.disabled = true;
+        await api('POST', '/api/watchers', { toggleId: w.id });
+        w.enabled = !w.enabled;
+        btn.textContent = w.enabled ? 'Enabled' : 'Disabled';
+        btn.className = `btn small ${w.enabled ? 'btn-primary' : 'btn-ghost'}`;
+        btn.disabled = false;
+      };
+      list.appendChild(card);
+    }
+  } catch (err) {
+    toast(err.message || 'Could not load automations.');
+  }
+});
+$('#watchers-close').addEventListener('click', () => $('#watchers-dialog').close());
+
 hydrateIcons();
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') closeMenu();
 });
 
 $('#menu').addEventListener('click', (e) => {
-  const act = e.target.dataset.act;
+  const item = e.target.closest('[data-act]');
+  if (!item) return;
+  const act = item.dataset.act;
   const entry = state.menuTarget;
   closeMenu();
   if (!act || !entry) return;
   const baseDir = entry.dir || state.path;
   const p = entry.path || joinPath(baseDir, entry.name);
+  if (act === 'star') toggleStarPath(p);
+  if (act === 'details') openDetailsDialog(entry, p);
   if (act === 'open') openEntry(entry, baseDir);
   if (act === 'convert') convertToEditable(entry.name, p);
   if (act === 'share') openShareDialog(entry, baseDir);
@@ -1652,6 +1965,8 @@ async function openAccount() {
   $('#password-error').textContent = '';
   $('#account-dialog').showModal();
   renderDevices().catch((ex) => toast(ex.message));
+  $('#pair-box').hidden = true;
+  $('#ai-connect-card').hidden = true;
   $('#mcp-token-form').hidden = true;
   $('#mcp-created-box').hidden = true;
   renderAgentTokens().catch((ex) => toast(ex.message));
@@ -1711,9 +2026,18 @@ function renderPhoneSection() {
   try {
     status = JSON.parse(phone.status());
   } catch {}
-  $('#phone-sync-status').textContent = status.syncFolder ? `On for "${status.syncFolder}"` : 'Off';
-  $('#phone-upload-now').hidden = !status.syncFolder;
-  $('#phone-stop').hidden = !status.syncFolder;
+  const devName = status.deviceName || 'This phone';
+  const folder = status.syncFolder;
+  const backupPath = status.backupPath || `/Backups/${devName}`;
+  const titleEl = $('#phone-backup-title');
+  if (titleEl) titleEl.textContent = folder ? `Cloud backup: ${devName}` : 'Cloud backup';
+  $('#phone-sync-status').textContent = folder ? `On for "${folder}" → ${backupPath}` : 'Off · Tap to back up Camera or a folder to /Backups';
+  const pathEl = $('#phone-backup-path');
+  if (pathEl) pathEl.textContent = backupPath;
+  $('#phone-upload-now').hidden = !folder;
+  const openBackupsBtn = $('#phone-open-backups');
+  if (openBackupsBtn) openBackupsBtn.hidden = !folder;
+  $('#phone-stop').hidden = !folder;
   $('#phone-version').textContent = status.version ? `You have ${status.version}` : '';
 }
 
@@ -1770,6 +2094,253 @@ $('#mcp-token-form').addEventListener('submit', async (e) => {
     $('#mcp-token-error').textContent = ex.message;
   }
 });
+
+// ---------- device pairing & AI connect ----------
+
+let pairTimerInterval = null;
+let pairPollInterval = null;
+let cachedAiToken = null;
+
+$('#pair-open-btn').addEventListener('click', async () => {
+  const box = $('#pair-box');
+  const willShow = box.hidden;
+  box.hidden = !willShow;
+  $('#pair-approve-error').textContent = '';
+  if (!willShow) {
+    if (pairTimerInterval) clearInterval(pairTimerInterval);
+    return;
+  }
+  try {
+    const res = await api('POST', '/api/pair/link');
+    const fullUrl = res.url || `${location.origin}/pair#${res.token}`;
+    $('#pair-link-input').value = fullUrl;
+    $('#pair-link-copy').onclick = () => copyText(fullUrl, 'Pairing link copied!');
+
+    const qrWrap = $('#pair-qr');
+    qrWrap.replaceChildren();
+    if (typeof window.qrcode === 'function') {
+      try {
+        const qr = window.qrcode(0, 'M');
+        qr.addData(fullUrl);
+        qr.make();
+        qrWrap.innerHTML = qr.createSvgTag({ cellSize: 4, margin: 4 });
+      } catch (e) {
+        qrWrap.textContent = fullUrl;
+      }
+    }
+
+    let remaining = res.expiresIn || 300;
+    const updateTimer = () => {
+      const mins = Math.floor(remaining / 60);
+      const secs = String(remaining % 60).padStart(2, '0');
+      $('#pair-timer').textContent = `Link and QR code expire in ${mins}:${secs}`;
+      if (remaining <= 0) {
+        clearInterval(pairTimerInterval);
+        $('#pair-timer').textContent = 'This link has expired. Tap "+ Connect a device" again to generate a new one.';
+      }
+      remaining--;
+    };
+    if (pairTimerInterval) clearInterval(pairTimerInterval);
+    updateTimer();
+    pairTimerInterval = setInterval(updateTimer, 1000);
+  } catch (err) {
+    toast(err.message || 'Could not generate pairing link.');
+    box.hidden = true;
+  }
+});
+
+$('#pair-close-btn').addEventListener('click', () => {
+  $('#pair-box').hidden = true;
+  if (pairTimerInterval) clearInterval(pairTimerInterval);
+});
+
+$('#pair-approve-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const f = e.target;
+  const errEl = $('#pair-approve-error');
+  errEl.textContent = '';
+  const code = f.code.value.trim().replace(/[^a-zA-Z0-9]/g, '');
+  try {
+    const res = await api('POST', '/api/pair/approve', { code });
+    toast('Approved. That device is signing in now.');
+    f.reset();
+    $('#pair-box').hidden = true;
+    if (pairTimerInterval) clearInterval(pairTimerInterval);
+    renderDevices();
+  } catch (err) {
+    errEl.textContent = err.message || 'Invalid or expired pairing code.';
+  }
+});
+
+$('#auth-pair-btn').addEventListener('click', async () => {
+  $('#auth-form').hidden = true;
+  $('#pair-request-card').hidden = false;
+  $('#pair-request-code').textContent = '----';
+  $('#pair-request-status').innerHTML = '<span class="spinner-dot"></span> Requesting pairing code…';
+  try {
+    const res = await api('POST', '/api/pair/request');
+    $('#pair-request-code').textContent = res.code;
+    $('#pair-request-status').innerHTML = '<span class="spinner-dot"></span> Waiting for approval on your other device…';
+
+    if (pairPollInterval) clearInterval(pairPollInterval);
+    pairPollInterval = setInterval(async () => {
+      try {
+        const check = await api('GET', `/api/pair/status?id=${encodeURIComponent(res.id)}`);
+        if (check.status === 'approved') {
+          clearInterval(pairPollInterval);
+          pairPollInterval = null;
+          toast('Device approved! Signed in.');
+          location.href = '/';
+        } else if (check.status === 'expired') {
+          clearInterval(pairPollInterval);
+          pairPollInterval = null;
+          $('#pair-request-status').textContent = 'Code expired. Tap "Use password instead" to retry.';
+        }
+      } catch (err) {
+        clearInterval(pairPollInterval);
+      }
+    }, 2000);
+  } catch (err) {
+    $('#pair-request-status').textContent = err.message || 'Could not request code.';
+  }
+});
+
+$('#pair-request-cancel').addEventListener('click', () => {
+  if (pairPollInterval) clearInterval(pairPollInterval);
+  pairPollInterval = null;
+  $('#pair-request-card').hidden = true;
+  $('#auth-form').hidden = false;
+});
+
+async function bootPair() {
+  $('#drive-view').hidden = true;
+  $('#public-share-view').hidden = true;
+  $('#auth-view').hidden = false;
+  $('#auth-form').hidden = true;
+  $('#pair-request-card').hidden = true;
+  $('#pair-claim-card').hidden = false;
+
+  const hash = location.hash.replace(/^#/, '');
+  const params = new URLSearchParams(location.search);
+  const token = hash || params.get('token');
+
+  if (!token) {
+    $('#pair-claim-title').textContent = 'Invalid pairing link';
+    $('#pair-claim-msg').textContent = 'No pairing token was provided in this URL.';
+    $('#pair-claim-actions').hidden = false;
+    $('#pair-claim-retry').onclick = () => { location.href = '/'; };
+    return;
+  }
+
+  $('#pair-claim-title').textContent = 'Connecting this device…';
+  $('#pair-claim-msg').textContent = 'Please wait while your session is established.';
+  $('#pair-claim-actions').hidden = true;
+
+  try {
+    const res = await api('POST', '/api/pair/claim', { token });
+    $('#pair-claim-title').textContent = 'Connected!';
+    $('#pair-claim-msg').textContent = `Signed in as ${res.user}. Opening your drive…`;
+    toast(`Connected as ${res.user}!`);
+    setTimeout(() => {
+      location.href = '/';
+    }, 800);
+  } catch (err) {
+    $('#pair-claim-title').textContent = 'Pairing link expired or invalid';
+    $('#pair-claim-msg').textContent = err.message || 'This pairing link has expired or has already been used.';
+    $('#pair-claim-actions').hidden = false;
+    $('#pair-claim-retry').onclick = () => { location.href = '/'; };
+  }
+}
+
+// One click: pick what the AI may do, get a token, and copy a ready-made setup for your tool.
+$('#ai-quick-connect-btn').addEventListener('click', () => {
+  const card = $('#ai-connect-card');
+  card.hidden = !card.hidden;
+  if (card.hidden) return;
+  $('#ai-connect-step1').hidden = !!cachedAiToken;
+  $('#ai-tab-content-wrap').hidden = !cachedAiToken;
+});
+
+for (const btn of document.querySelectorAll('[data-ai-scope]')) {
+  btn.addEventListener('click', async () => {
+    try {
+      const { token } = await api('POST', '/api/tokens', {
+        label: btn.dataset.aiScope === 'read' ? 'AI assistant (read only)' : 'AI assistant',
+        scope: btn.dataset.aiScope,
+        rootPath: '/',
+        expiresInDays: 90,
+      });
+      cachedAiToken = token;
+      renderAgentTokens().catch(() => {});
+      fillAiConnect(token);
+      $('#ai-connect-step1').hidden = true;
+      $('#ai-tab-content-wrap').hidden = false;
+    } catch (err) {
+      toast(err.message || 'Could not make a token for the AI.');
+    }
+  });
+}
+
+function fillAiConnect(token) {
+  const mcpUrl = `${location.origin}/mcp`;
+  const claudeCmd = `claude mcp add --transport http rdrive ${mcpUrl} --header "Authorization: Bearer ${token}"`;
+  $('#ai-claude-code-cmd').textContent = claudeCmd;
+  $('#ai-copy-claude-code').onclick = () => copyText(claudeCmd, 'Claude Code command copied!');
+
+  // Claude Desktop's config file only runs local commands, so it reaches rdrive through mcp-remote.
+  const claudeDesktopConfig = JSON.stringify({
+    mcpServers: {
+      rdrive: {
+        command: 'npx',
+        args: ['-y', 'mcp-remote', mcpUrl, '--header', 'Authorization:${RDRIVE_AUTH}'],
+        env: { RDRIVE_AUTH: `Bearer ${token}` },
+      },
+    },
+  }, null, 2);
+  $('#ai-claude-desktop-cfg').textContent = claudeDesktopConfig;
+  $('#ai-copy-claude-desktop').onclick = () => copyText(claudeDesktopConfig, 'Claude Desktop config copied!');
+
+  const cursorConfig = JSON.stringify({
+    mcpServers: {
+      rdrive: {
+        url: mcpUrl,
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      },
+    },
+  }, null, 2);
+  $('#ai-cursor-cfg').textContent = cursorConfig;
+  $('#ai-copy-cursor').onclick = () => copyText(cursorConfig, 'Cursor config copied!');
+
+  const llmsUrl = `${location.origin}/llms.txt`;
+  $('#ai-llms-url').textContent = llmsUrl;
+  const brief =
+    `You can use my rdrive (my own private file drive) through its MCP server at ${mcpUrl}.\n` +
+    `Send the header "Authorization: Bearer ${token}" with every request.\n` +
+    `Read ${llmsUrl} first: it lists every tool. Documents (.rdoc) are read and written as Markdown ` +
+    `with doc_read, doc_write and doc_append; spreadsheets with sheet_read and sheet_update_cells.`;
+  $('#ai-copy-llms').onclick = () => copyText(brief, 'Instructions for the AI copied!');
+}
+
+$('#ai-connect-close').addEventListener('click', () => {
+  $('#ai-connect-card').hidden = true;
+});
+
+const aiTabs = [
+  { btn: 'ai-tab-claude-code', pane: 'ai-pane-claude-code' },
+  { btn: 'ai-tab-claude-desktop', pane: 'ai-pane-claude-desktop' },
+  { btn: 'ai-tab-cursor', pane: 'ai-pane-cursor' },
+  { btn: 'ai-tab-llms', pane: 'ai-pane-llms' },
+];
+for (const t of aiTabs) {
+  $(`#${t.btn}`).addEventListener('click', () => {
+    for (const other of aiTabs) {
+      $(`#${other.btn}`).classList.toggle('active', other.btn === t.btn);
+      $(`#${other.pane}`).hidden = other.pane !== t.pane;
+    }
+  });
+}
 
 // ---------- linked servers (sync) ----------
 
@@ -2065,7 +2636,926 @@ window.addEventListener('hashchange', () => {
   if (state.user) load();
 });
 
+// ==================== Starred View ====================
+async function loadStarred() {
+  state.view = 'starred';
+  setNav('starred');
+  $('#photos-view').hidden = true;
+  $('#listing').hidden = false;
+  $('#crumbs').innerHTML = '<span><a href="#/">My Drive</a></span><span class="crumb-sep">/</span><span>Starred</span>';
+  $('#drive-actions').hidden = true;
+  $('#trash-actions').hidden = true;
+  $('#select-all').disabled = true;
+
+  try {
+    const data = await api('GET', '/api/starred');
+    state.entries = data.items || [];
+    if (Array.isArray(data.starred)) state.starred = new Set(data.starred);
+  } catch (err) {
+    toast(err.message);
+    state.entries = [];
+  }
+  render();
+  $('#empty').hidden = state.entries.length > 0;
+  $('#empty-title').textContent = 'No starred files yet.';
+  $('#empty-sub').textContent = 'Star files or folders to find them easily here.';
+}
+
+// ==================== File Details & QR Inspector ====================
+function openDetailsDialog(entry, p) {
+  const dlg = $('#details-dialog');
+  $('#details-filename').textContent = entry.name;
+  $('#details-path').textContent = p;
+  $('#details-kind').textContent = kindOf(entry);
+  $('#details-size').textContent = entry.type === 'folder' ? '—' : formatSize(entry.size);
+  $('#details-modified').textContent = formatDate(entry.modified);
+  const isStarred = state.starred && state.starred.has(p);
+  $('#details-starred').textContent = isStarred ? 'Yes ★' : 'No';
+  $('#details-star-btn').textContent = isStarred ? 'Unstar' : 'Star';
+
+  const iconContainer = $('#details-icon');
+  iconContainer.replaceChildren(uiIcon(iconFor(entry)));
+
+  // Generate QR code for mobile
+  const qrContainer = $('#details-qrcode');
+  qrContainer.replaceChildren();
+  if (window.QRCode) {
+    const directUrl = `${location.origin}${downloadUrl(p, true)}`;
+    new QRCode(qrContainer, {
+      text: directUrl,
+      width: 140,
+      height: 140,
+      correctLevel: QRCode.CorrectLevel.M
+    });
+  }
+
+  $('#details-open-btn').onclick = () => {
+    dlg.close();
+    openEntry(entry);
+  };
+  $('#details-star-btn').onclick = async () => {
+    await toggleStarPath(p);
+    const nowStarred = state.starred.has(p);
+    $('#details-starred').textContent = nowStarred ? 'Yes ★' : 'No';
+    $('#details-star-btn').textContent = nowStarred ? 'Unstar' : 'Star';
+    if (state.view === 'starred' && !nowStarred) loadStarred();
+  };
+  $('#details-download-btn').href = downloadUrl(p);
+  $('#details-download-btn').setAttribute('download', entry.name);
+  $('#details-share-btn').onclick = () => {
+    dlg.close();
+    openShareDialog(entry, entry.dir || state.path);
+  };
+
+  dlg.showModal();
+}
+$('#details-close').addEventListener('click', () => $('#details-dialog').close());
+
+// ==================== Persistent Audio Player Dock ====================
+function playAudioDock(name, p) {
+  const dock = $('#audio-dock');
+  const title = $('#audio-dock-title');
+  const time = $('#audio-dock-time');
+  const audio = $('#audio-dock-element');
+  const playLabel = $('#audio-dock-play-label');
+  const seek = $('#audio-dock-seek');
+
+  dock.hidden = false;
+  title.textContent = name;
+  audio.src = downloadUrl(p, true);
+  audio.play().catch(() => {});
+  playLabel.textContent = '⏸';
+
+  audio.ontimeupdate = () => {
+    if (audio.duration) {
+      seek.value = (audio.currentTime / audio.duration) * 100;
+      time.textContent = `${formatAudioTime(audio.currentTime)} / ${formatAudioTime(audio.duration)}`;
+    }
+  };
+
+  audio.onended = () => {
+    playLabel.textContent = '▶';
+  };
+}
+
+function formatAudioTime(sec) {
+  if (isNaN(sec)) return '0:00';
+  const m = Math.floor(sec / 60);
+  const s = Math.floor(sec % 60);
+  return `${m}:${s < 10 ? '0' : ''}${s}`;
+}
+
+$('#audio-dock-play').addEventListener('click', () => {
+  const audio = $('#audio-dock-element');
+  const playLabel = $('#audio-dock-play-label');
+  if (audio.paused) {
+    audio.play();
+    playLabel.textContent = '⏸';
+  } else {
+    audio.pause();
+    playLabel.textContent = '▶';
+  }
+});
+$('#audio-dock-seek').addEventListener('input', (e) => {
+  const audio = $('#audio-dock-element');
+  if (audio.duration) {
+    audio.currentTime = (e.target.value / 100) * audio.duration;
+  }
+});
+$('#audio-dock-close').addEventListener('click', () => {
+  const audio = $('#audio-dock-element');
+  audio.pause();
+  audio.src = '';
+  $('#audio-dock').hidden = true;
+});
+
+// ==================== Mobile Document Camera Scanner ====================
+$('#scanner-input').addEventListener('change', async (e) => {
+  const file = e.target.files?.[0];
+  if (!file) return;
+  e.target.value = '';
+  toast('Processing scanned document…');
+
+  const img = new Image();
+  const url = URL.createObjectURL(file);
+  img.onload = async () => {
+    URL.revokeObjectURL(url);
+    const canvas = document.createElement('canvas');
+    canvas.width = img.width;
+    canvas.height = img.height;
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(img, 0, 0);
+
+    // Document contrast & binarization shader
+    try {
+      const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      const d = imgData.data;
+      for (let i = 0; i < d.length; i += 4) {
+        const gray = (d[i] * 0.299 + d[i + 1] * 0.587 + d[i + 2] * 0.114);
+        const val = gray > 135 ? Math.min(255, gray * 1.15) : Math.max(0, gray * 0.85);
+        d[i] = val;
+        d[i + 1] = val;
+        d[i + 2] = val;
+      }
+      ctx.putImageData(imgData, 0, 0);
+    } catch {}
+
+    canvas.toBlob(async (blob) => {
+      const now = new Date();
+      const stamp = now.getFullYear() +
+        String(now.getMonth() + 1).padStart(2, '0') +
+        String(now.getDate()).padStart(2, '0') + '_' +
+        String(now.getHours()).padStart(2, '0') +
+        String(now.getMinutes()).padStart(2, '0') +
+        String(now.getSeconds()).padStart(2, '0');
+      const scanName = `Scan_${stamp}.jpg`;
+      const targetDir = state.path === '/' ? '/Scans' : state.path;
+
+      if (state.path === '/') {
+        try { await api('POST', '/api/mkdir', { path: '/', name: 'Scans' }); } catch {}
+      }
+
+      const scanFile = new File([blob], scanName, { type: 'image/jpeg' });
+      queueUploads([{ file: scanFile, dir: targetDir }]);
+      toast(`Document scanned and uploaded to ${targetDir}`);
+      if (navigator.vibrate) navigator.vibrate(25);
+    }, 'image/jpeg', 0.92);
+  };
+  img.src = url;
+});
+
+// ==================== Pull to Refresh & Haptic Gesture ====================
+let touchStartY = 0;
+let isPulling = false;
+window.addEventListener('touchstart', (e) => {
+  if (window.scrollY === 0) {
+    touchStartY = e.touches[0].clientY;
+    isPulling = true;
+  }
+}, { passive: true });
+
+window.addEventListener('touchmove', (e) => {
+  if (!isPulling || window.scrollY > 0) return;
+  const pullDistance = e.touches[0].clientY - touchStartY;
+  if (pullDistance > 60) {
+    $('#pull-refresh').hidden = false;
+  }
+}, { passive: true });
+
+window.addEventListener('touchend', async (e) => {
+  if (!isPulling) return;
+  const pullDistance = e.changedTouches[0].clientY - touchStartY;
+  isPulling = false;
+  if (pullDistance > 75 && window.scrollY === 0) {
+    if (navigator.vibrate) navigator.vibrate(15);
+    if (state.view === 'photos') await loadPhotos('all');
+    else if (state.view === 'starred') await loadStarred();
+    else await load();
+  }
+  $('#pull-refresh').hidden = true;
+}, { passive: true });
+
+// PWA / App Shortcuts router
+window.addEventListener('hashchange', () => {
+  if (location.hash === '#photos') loadPhotos('all');
+  else if (location.hash === '#starred') loadStarred();
+  else if (location.hash === '#xod') openXodDialog();
+  else if (location.hash === '#scan') { $('#scanner-input').click(); }
+  else if (location.hash === '#new-doc') { createNewDocument(); }
+  else {
+    state.view = 'drive';
+    load();
+  }
+});
+
+// ==================== Encrypted Private Vault ====================
+
+async function openVaultDialog() {
+  try {
+    const status = await api('GET', '/api/vault/status');
+    const dialog = $('#vault-dialog');
+    if (!status.hasPin) {
+      $('#vault-setup-view').hidden = false;
+      $('#vault-unlock-view').hidden = true;
+      $('#vault-setup-pin').value = '';
+      $('#vault-setup-confirm').value = '';
+      $('#vault-setup-error').textContent = '';
+      dialog.showModal();
+    } else if (status.unlocked || state.vaultToken) {
+      if (state.path !== '/Vault') {
+        navigate('/Vault');
+      } else {
+        $('#vault-setup-view').hidden = true;
+        $('#vault-unlock-view').hidden = false;
+        $('#vault-lock-btn').hidden = false;
+        $('#vault-unlock-error').textContent = '';
+        dialog.showModal();
+      }
+    } else {
+      $('#vault-setup-view').hidden = true;
+      $('#vault-unlock-view').hidden = false;
+      $('#vault-unlock-pin').value = '';
+      $('#vault-unlock-error').textContent = '';
+      $('#vault-lock-btn').hidden = true;
+      dialog.showModal();
+    }
+  } catch (err) {
+    toast(err.message || 'Vault unavailable');
+  }
+}
+
+$('#vault-setup-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const p1 = $('#vault-setup-pin').value;
+  const p2 = $('#vault-setup-confirm').value;
+  if (p1 !== p2) {
+    $('#vault-setup-error').textContent = 'PINs do not match.';
+    return;
+  }
+  if (p1.length < 4) {
+    $('#vault-setup-error').textContent = 'PIN must be at least 4 characters.';
+    return;
+  }
+  try {
+    const res = await api('POST', '/api/vault/setup', { pin: p1 });
+    state.vaultToken = res.vaultToken || res.token;
+    $('#vault-dialog').close();
+    toast('Vault created and unlocked!');
+    navigate('/Vault');
+  } catch (err) {
+    $('#vault-setup-error').textContent = err.message;
+  }
+});
+
+$('#vault-unlock-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const pin = $('#vault-unlock-pin').value;
+  try {
+    const res = await api('POST', '/api/vault/unlock', { pin });
+    state.vaultToken = res.vaultToken || res.token;
+    $('#vault-dialog').close();
+    toast('Vault unlocked!');
+    navigate('/Vault');
+  } catch (err) {
+    $('#vault-unlock-error').textContent = err.message;
+  }
+});
+
+$('#vault-lock-btn').addEventListener('click', async () => {
+  try {
+    await api('POST', '/api/vault/lock');
+    state.vaultToken = null;
+    $('#vault-dialog').close();
+    toast('Vault locked.');
+    if (state.path.startsWith('/Vault')) {
+      navigate('/');
+    } else {
+      load();
+    }
+  } catch (err) {
+    toast(err.message);
+  }
+});
+
+$('#vault-close').addEventListener('click', () => $('#vault-dialog').close());
+$('#vault-btn').addEventListener('click', () => openVaultDialog());
+
+
+// ==================== Voice Memo & Audio Recorder ====================
+
+let voiceMediaRecorder = null;
+let voiceAudioChunks = [];
+let voiceAudioContext = null;
+let voiceAnalyser = null;
+let voiceAnimId = null;
+let voiceTimerInterval = null;
+let voiceRecordStartTime = 0;
+let recordedVoiceBlob = null;
+
+function formatRecordTime(seconds) {
+  const m = Math.floor(seconds / 60).toString().padStart(2, '0');
+  const s = (seconds % 60).toString().padStart(2, '0');
+  return `${m}:${s}`;
+}
+
+function drawIdleWaveform(canvas) {
+  const ctx = canvas.getContext('2d');
+  const w = canvas.width;
+  const h = canvas.height;
+  ctx.clearRect(0, 0, w, h);
+  ctx.beginPath();
+  ctx.moveTo(0, h / 2);
+  for (let x = 0; x < w; x++) {
+    const y = h / 2 + Math.sin(x * 0.05) * 4;
+    ctx.lineTo(x, y);
+  }
+  ctx.strokeStyle = 'rgba(13, 148, 136, 0.4)';
+  ctx.lineWidth = 2;
+  ctx.stroke();
+}
+
+function openVoiceMemoDialog() {
+  const dlg = $('#voice-memo-dialog');
+  const canvas = $('#voice-memo-canvas');
+  $('#voice-memo-timer').textContent = '00:00';
+  $('#voice-record-btn').textContent = 'Start Recording';
+  $('#voice-record-btn').classList.remove('recording');
+  $('#voice-save-btn').hidden = true;
+  $('#voice-discard-btn').hidden = true;
+  recordedVoiceBlob = null;
+  drawIdleWaveform(canvas);
+  dlg.showModal();
+}
+
+async function startVoiceRecording() {
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    voiceAudioChunks = [];
+    voiceMediaRecorder = new MediaRecorder(stream);
+    voiceMediaRecorder.ondataavailable = (e) => {
+      if (e.data && e.data.size > 0) voiceAudioChunks.push(e.data);
+    };
+
+    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+    voiceAudioContext = new AudioCtx();
+    const source = voiceAudioContext.createMediaStreamSource(stream);
+    voiceAnalyser = voiceAudioContext.createAnalyser();
+    voiceAnalyser.fftSize = 256;
+    source.connect(voiceAnalyser);
+
+    const canvas = $('#voice-memo-canvas');
+    const ctx = canvas.getContext('2d');
+    const bufferLength = voiceAnalyser.frequencyBinCount;
+    const dataArray = new Uint8Array(bufferLength);
+
+    function drawWave() {
+      voiceAnimId = requestAnimationFrame(drawWave);
+      voiceAnalyser.getByteTimeDomainData(dataArray);
+
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.lineWidth = 3;
+      ctx.strokeStyle = '#0d9488';
+      ctx.beginPath();
+
+      const sliceWidth = (canvas.width * 1.0) / bufferLength;
+      let x = 0;
+      for (let i = 0; i < bufferLength; i++) {
+        const v = dataArray[i] / 128.0;
+        const y = (v * canvas.height) / 2;
+        if (i === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+        x += sliceWidth;
+      }
+      ctx.lineTo(canvas.width, canvas.height / 2);
+      ctx.stroke();
+    }
+    drawWave();
+
+    voiceRecordStartTime = Date.now();
+    voiceTimerInterval = setInterval(() => {
+      const elapsed = Math.floor((Date.now() - voiceRecordStartTime) / 1000);
+      $('#voice-memo-timer').textContent = formatRecordTime(elapsed);
+    }, 500);
+
+    voiceMediaRecorder.start();
+    $('#voice-record-btn').textContent = 'Stop Recording';
+    $('#voice-record-btn').classList.add('recording');
+    $('#voice-save-btn').hidden = true;
+    $('#voice-discard-btn').hidden = true;
+  } catch (err) {
+    toast(`Microphone error: ${err.message}`);
+  }
+}
+
+function stopVoiceRecording() {
+  if (!voiceMediaRecorder) return;
+  voiceMediaRecorder.onstop = () => {
+    recordedVoiceBlob = new Blob(voiceAudioChunks, { type: 'audio/webm' });
+    $('#voice-record-btn').textContent = 'Record Again';
+    $('#voice-record-btn').classList.remove('recording');
+    $('#voice-save-btn').hidden = false;
+    $('#voice-discard-btn').hidden = false;
+  };
+  voiceMediaRecorder.stop();
+  if (voiceMediaRecorder.stream) {
+    voiceMediaRecorder.stream.getTracks().forEach((t) => t.stop());
+  }
+  if (voiceTimerInterval) clearInterval(voiceTimerInterval);
+  if (voiceAnimId) cancelAnimationFrame(voiceAnimId);
+  if (voiceAudioContext && voiceAudioContext.state !== 'closed') {
+    voiceAudioContext.close().catch(() => {});
+  }
+}
+
+$('#voice-record-btn').addEventListener('click', () => {
+  if (voiceMediaRecorder && voiceMediaRecorder.state === 'recording') {
+    stopVoiceRecording();
+  } else {
+    startVoiceRecording();
+  }
+});
+
+$('#voice-save-btn').addEventListener('click', async () => {
+  if (!recordedVoiceBlob) return;
+  const now = new Date();
+  const pad = (n) => String(n).padStart(2, '0');
+  const dStr = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}_${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
+  const filename = `Voice_${dStr}.webm`;
+  const p = `/Voice Memos/${filename}`;
+
+  const fd = new FormData();
+  fd.append('file', recordedVoiceBlob, filename);
+  fd.append('dir', '/Voice Memos');
+
+  try {
+    $('#voice-save-btn').disabled = true;
+    $('#voice-save-btn').textContent = 'Saving...';
+    try { await api('POST', '/api/mkdir', { dir: '/', name: 'Voice Memos' }); } catch {}
+
+    const headers = state.vaultToken ? { 'X-Rdrive-Vault': state.vaultToken } : {};
+    const res = await fetch('/api/upload', {
+      method: 'POST',
+      body: fd,
+      headers: { ...headers, 'X-Rdrive': '1' },
+      credentials: 'include',
+    });
+    if (!res.ok) throw new Error('Failed to upload voice memo');
+
+    $('#voice-memo-dialog').close();
+    toast('Voice memo saved to /Voice Memos');
+    if (state.path === '/Voice Memos') await load();
+    playAudioDock(filename, p);
+  } catch (err) {
+    toast(`Could not save voice memo: ${err.message}`);
+  } finally {
+    $('#voice-save-btn').disabled = false;
+    $('#voice-save-btn').textContent = 'Save to Drive';
+  }
+});
+
+$('#voice-discard-btn').addEventListener('click', () => {
+  recordedVoiceBlob = null;
+  $('#voice-memo-timer').textContent = '00:00';
+  $('#voice-record-btn').textContent = 'Start Recording';
+  $('#voice-save-btn').hidden = true;
+  $('#voice-discard-btn').hidden = true;
+  drawIdleWaveform($('#voice-memo-canvas'));
+});
+
+$('#voice-memo-close').addEventListener('click', () => {
+  if (voiceMediaRecorder && voiceMediaRecorder.state === 'recording') {
+    stopVoiceRecording();
+  }
+  $('#voice-memo-dialog').close();
+});
+
+
+// ==================== Storage Analytics & Cleaner ====================
+
+const STORAGE_CAT_COLORS = {
+  photos: '#0d9488',
+  videos: '#8b5cf6',
+  audio: '#ec4899',
+  documents: '#3b82f6',
+  sheets: '#10b981',
+  code: '#f59e0b',
+  backups: '#6366f1',
+  archives: '#ef4444',
+  other: '#64748b',
+};
+
+async function openStorageDialog() {
+  const dlg = $('#storage-dialog');
+  dlg.showModal();
+  $('#storage-duplicates-list').innerHTML = '<p class="muted small">Scanning files for duplicates…</p>';
+  $('#storage-large-list').innerHTML = '<p class="muted small">Scanning for large files…</p>';
+  $('#clean-duplicates-btn').hidden = true;
+
+  try {
+    const data = await api('GET', '/api/storage/analytics');
+    renderStorageBreakdown(data);
+  } catch (err) {
+    $('#storage-duplicates-list').innerHTML = `<p class="error">${err.message}</p>`;
+  }
+}
+
+function renderStorageBreakdown(data) {
+  const bar = $('#storage-bar');
+  const legend = $('#storage-legend');
+  bar.replaceChildren();
+  legend.replaceChildren();
+
+  const total = data.totalBytes || 1;
+  const cats = data.categories || {};
+
+  for (const [key, val] of Object.entries(cats)) {
+    const bytes = typeof val === 'object' && val !== null ? val.bytes : Number(val);
+    if (!bytes) continue;
+    const color = STORAGE_CAT_COLORS[key] || '#94a3b8';
+    const pct = ((bytes / total) * 100).toFixed(1);
+
+    const seg = document.createElement('div');
+    seg.className = 'storage-bar-seg';
+    seg.style.width = `${pct}%`;
+    seg.style.backgroundColor = color;
+    seg.title = `${key.toUpperCase()}: ${formatSize(bytes)} (${pct}%)`;
+    bar.appendChild(seg);
+
+    const leg = document.createElement('div');
+    leg.className = 'storage-legend-item';
+    leg.innerHTML = `<span class="storage-legend-dot" style="background:${color}"></span><span><strong>${key[0].toUpperCase() + key.slice(1)}</strong>: ${formatSize(bytes)}</span>`;
+    legend.appendChild(leg);
+  }
+
+  // Duplicates
+  const dupList = $('#storage-duplicates-list');
+  dupList.replaceChildren();
+  const cleanBtn = $('#clean-duplicates-btn');
+
+  const dupes = data.duplicates || [];
+  if (dupes.length === 0) {
+    dupList.innerHTML = '<p class="muted small">No duplicate files found. Your drive is clean!</p>';
+    cleanBtn.hidden = true;
+  } else {
+    let totalSavings = 0;
+    const pathsToClean = [];
+
+    for (const cluster of dupes) {
+      totalSavings += cluster.potentialSavings || 0;
+      const el = document.createElement('div');
+      el.className = 'duplicate-cluster';
+
+      const head = document.createElement('div');
+      head.className = 'duplicate-head';
+      head.innerHTML = `<strong>${cluster.files[0].name}</strong> <span class="muted small">${formatSize(cluster.size)} each · Free up ${formatSize(cluster.potentialSavings)}</span>`;
+      el.appendChild(head);
+
+      cluster.files.forEach((f, idx) => {
+        const row = document.createElement('div');
+        row.className = 'duplicate-file-row';
+        if (idx === 0) {
+          row.innerHTML = `<span>Keep: <code class="mono">${f.path}</code></span><span class="chip">Original</span>`;
+        } else {
+          pathsToClean.push(f.path);
+          row.innerHTML = `<span>Clean: <code class="mono">${f.path}</code></span><span class="muted">${formatDate(f.mtime)}</span>`;
+        }
+        el.appendChild(row);
+      });
+      dupList.appendChild(el);
+    }
+
+    cleanBtn.hidden = false;
+    cleanBtn.textContent = `Clean All Duplicates (Free up ${formatSize(totalSavings)})`;
+    cleanBtn.onclick = async () => {
+      if (!confirm(`Delete ${pathsToClean.length} duplicate file(s) and free up ${formatSize(totalSavings)}?`)) return;
+      try {
+        await api('POST', '/api/delete', { paths: pathsToClean });
+        toast(`Freed ${formatSize(totalSavings)}!`);
+        openStorageDialog();
+        load();
+      } catch (err) {
+        toast(`Error cleaning duplicates: ${err.message}`);
+      }
+    };
+  }
+
+  // Large Files
+  const largeList = $('#storage-large-list');
+  largeList.replaceChildren();
+  const largeFiles = data.largeFiles || [];
+  if (largeFiles.length === 0) {
+    largeList.innerHTML = '<p class="muted small">No large files found (> 10 MB).</p>';
+  } else {
+    for (const lf of largeFiles) {
+      const row = document.createElement('div');
+      row.className = 'duplicate-cluster';
+      row.style.cursor = 'pointer';
+      row.innerHTML = `<div class="duplicate-head"><strong>${lf.name}</strong> <span>${formatSize(lf.size)}</span></div><div class="muted small mono">${lf.path}</div>`;
+      row.onclick = () => {
+        $('#storage-dialog').close();
+        openEntry({ name: lf.name, path: lf.path, type: 'file' });
+      };
+      largeList.appendChild(row);
+    }
+  }
+}
+
+$('#storage-close').addEventListener('click', () => $('#storage-dialog').close());
+$('#usage').style.cursor = 'pointer';
+$('#usage').title = 'Click to view Storage Analytics & Duplicate Cleaner';
+$('#usage').addEventListener('click', () => openStorageDialog());
+const youUsage = $('#you-usage');
+if (youUsage) {
+  youUsage.style.cursor = 'pointer';
+  youUsage.title = 'Click to view Storage Analytics & Duplicate Cleaner';
+  youUsage.addEventListener('click', () => {
+    $('#account-dialog').close();
+    openStorageDialog();
+  });
+}
+
+
+// ==================== Quick Code & Config Editor ====================
+
+let currentCodePath = null;
+
+async function openCodeEditor(name, path) {
+  currentCodePath = path;
+  $('#code-editor-title').textContent = name;
+  $('#code-editor-status').textContent = 'Loading...';
+  $('#code-editor-content').value = '';
+  $('#code-editor-dialog').showModal();
+
+  try {
+    const res = await api('GET', `/api/code/read?path=${encodeURIComponent(path)}`);
+    $('#code-editor-content').value = res.content || '';
+    const lineCount = (res.content || '').split('\n').length;
+    $('#code-editor-status').textContent = `${lineCount} line${lineCount === 1 ? '' : 's'} · ${formatSize(res.bytes || (res.content || '').length)}`;
+  } catch (err) {
+    $('#code-editor-status').textContent = 'Error loading file';
+    toast(`Failed to load code: ${err.message}`);
+  }
+}
+
+async function saveCurrentCode() {
+  if (!currentCodePath) return;
+  const statusEl = $('#code-editor-status');
+  statusEl.textContent = 'Saving...';
+  try {
+    const content = $('#code-editor-content').value;
+    await api('POST', '/api/code/save', { path: currentCodePath, content });
+    statusEl.textContent = 'Saved ✓';
+    toast('File saved successfully.');
+    setTimeout(() => {
+      if (statusEl.textContent === 'Saved ✓') {
+        const lineCount = content.split('\n').length;
+        statusEl.textContent = `${lineCount} line${lineCount === 1 ? '' : 's'} · ${formatSize(content.length)}`;
+      }
+    }, 2000);
+  } catch (err) {
+    statusEl.textContent = 'Save failed';
+    toast(`Save error: ${err.message}`);
+  }
+}
+
+$('#code-editor-content').addEventListener('keydown', (e) => {
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
+    e.preventDefault();
+    saveCurrentCode();
+  } else if (e.key === 'Tab') {
+    e.preventDefault();
+    const textarea = e.target;
+    const start = textarea.selectionStart;
+    const end = textarea.selectionEnd;
+    textarea.value = textarea.value.substring(0, start) + '  ' + textarea.value.substring(end);
+    textarea.selectionStart = textarea.selectionEnd = start + 2;
+  }
+});
+
+$('#code-editor-save').addEventListener('click', () => saveCurrentCode());
+$('#code-editor-close').addEventListener('click', () => $('#code-editor-dialog').close());
+
+// ==================== 5. Xod Agent Copilot & Harness ====================
+
+let xodChatHistory = [];
+let xodStatus = null;
+
+async function openXodDialog() {
+  const dlg = $('#xod-dialog');
+  dlg.showModal();
+  updateXodStatus();
+}
+
+async function updateXodStatus() {
+  const statusChip = $('#xod-status-chip');
+  const activeModelEl = $('#xod-active-model');
+  const modelSelect = $('#xod-model-select');
+
+  try {
+    xodStatus = await api('GET', '/api/xod/status');
+    if (xodStatus.connected) {
+      statusChip.textContent = '● Connected';
+      statusChip.className = 'chip chip-success small';
+      activeModelEl.textContent = xodStatus.activeModel || 'Engine online';
+
+      // Populate model selector
+      modelSelect.replaceChildren();
+      for (const m of (xodStatus.models || [])) {
+        const opt = document.createElement('option');
+        opt.value = m.id;
+        const short = (m.id || '').replace(/^xod\//, '').replace(/:ctx\d+k?/, '').replace(/:\w+$/, '');
+        opt.textContent = short || m.name || m.id;
+        if (m.id === xodStatus.activeModel) opt.selected = true;
+        modelSelect.appendChild(opt);
+      }
+    } else {
+      statusChip.textContent = '○ Offline';
+      statusChip.className = 'chip small';
+      activeModelEl.textContent = 'No local model found';
+    }
+  } catch (err) {
+    statusChip.textContent = '○ Error';
+    statusChip.className = 'chip chip-danger small';
+    activeModelEl.textContent = err.message;
+  }
+}
+
+function xodRender(el, text) {
+  const esc = String(text).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  el.innerHTML = esc
+    .replace(/`([^`]+)`/g, '<code>$1</code>')
+    .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+}
+
+function appendXodMessage(role, text) {
+  const container = $('#xod-messages');
+  const wrap = document.createElement('div');
+  wrap.className = `xod-msg xod-msg-${role}`;
+  const bubble = document.createElement('div');
+  bubble.className = 'xod-bubble';
+  bubble.textContent = text;
+  wrap.appendChild(bubble);
+  container.appendChild(wrap);
+  container.scrollTop = container.scrollHeight;
+  return bubble;
+}
+
+function appendXodToolEvent(fnName, args) {
+  const container = $('#xod-messages');
+  const card = document.createElement('div');
+  card.className = 'xod-tool-card';
+  card.innerHTML = `<span class="spinner-dot"></span><span>🔧 Invoking <code>${fnName}</code>…</span>`;
+  const live = container.querySelector('.xod-msg.xod-live');
+  if (live) container.insertBefore(card, live); else container.appendChild(card);
+  container.scrollTop = container.scrollHeight;
+  return card;
+}
+
+function updateXodToolResult(card, fnName, result) {
+  let summary = 'Finished';
+  if (result.count !== undefined) summary = `Found ${result.count} items`;
+  else if (result.cleaned !== undefined) summary = `Cleaned ${result.cleaned} files`;
+  else if (result.totalFiles !== undefined) summary = `${result.totalFiles} files · ${formatSize(result.totalBytes || 0)}`;
+  else if (result.ok) summary = 'Success';
+  else if (result.error) summary = `Error: ${result.error}`;
+
+  card.innerHTML = `<span>✅</span><span><strong>${fnName}</strong>: ${summary}</span>`;
+}
+
+async function sendXodPrompt(promptText) {
+  if (!promptText || !promptText.trim()) return;
+  const input = $('#xod-input');
+  input.value = '';
+
+  appendXodMessage('user', promptText);
+  xodChatHistory.push({ role: 'user', content: promptText });
+
+  const sendBtn = $('#xod-send-btn');
+  sendBtn.disabled = true;
+
+  const assistantBubble = appendXodMessage('assistant', 'Thinking…');
+  assistantBubble.parentElement.classList.add('xod-live');
+  let toolCard = null;
+  let didModifyDrive = false;
+
+  const model = $('#xod-model-select').value || null;
+
+  try {
+    const res = await fetch('/api/xod/chat', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Rdrive': '1',
+      },
+      credentials: 'include',
+      body: JSON.stringify({
+        messages: xodChatHistory,
+        model,
+        stream: true,
+      }),
+    });
+
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    assistantBubble.textContent = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+
+      const lines = buffer.split('\n\n');
+      buffer = lines.pop();
+
+      for (const chunk of lines) {
+        if (!chunk.startsWith('data: ')) continue;
+        const jsonStr = chunk.slice(6).trim();
+        if (!jsonStr) continue;
+
+        try {
+          const evt = JSON.parse(jsonStr);
+          if (evt.type === 'reasoning') {
+            let rEl = assistantBubble.querySelector('.xod-reasoning');
+            if (!rEl) {
+              rEl = document.createElement('div');
+              rEl.className = 'xod-reasoning';
+              assistantBubble.prepend(rEl);
+            }
+            rEl.textContent = evt.content;
+          } else if (evt.type === 'tool_call') {
+            didModifyDrive = true;
+            toolCard = appendXodToolEvent(evt.name, evt.args);
+          } else if (evt.type === 'tool_result') {
+            if (toolCard) updateXodToolResult(toolCard, evt.name, evt.result);
+          } else if (evt.type === 'content') {
+            xodRender(assistantBubble, evt.content);
+          } else if (evt.type === 'delta') {
+            assistantBubble.textContent += evt.content;
+          } else if (evt.type === 'done' && evt.response) {
+            xodRender(assistantBubble, evt.response.content);
+            xodChatHistory.push({ role: 'assistant', content: evt.response.content });
+          } else if (evt.type === 'error') {
+            assistantBubble.textContent = `Error: ${evt.error}`;
+          }
+        } catch {}
+      }
+    }
+
+    if (didModifyDrive) {
+      load();
+    }
+  } catch (err) {
+    assistantBubble.textContent = `Agent error: ${err.message}`;
+  } finally {
+    sendBtn.disabled = false;
+    $('#xod-messages').scrollTop = $('#xod-messages').scrollHeight;
+  }
+}
+
+$('#xod-form').addEventListener('submit', (e) => {
+  e.preventDefault();
+  const val = $('#xod-input').value;
+  sendXodPrompt(val);
+});
+
+$('#xod-quick-chips').addEventListener('click', (e) => {
+  const chip = e.target.closest('[data-prompt]');
+  if (!chip) return;
+  const prompt = chip.dataset.prompt;
+  sendXodPrompt(prompt);
+});
+
+$('#xod-close').addEventListener('click', () => $('#xod-dialog').close());
+
 (async function boot() {
+  console.log('[RDrive] boot() start: pathname=' + location.pathname + ' hash=' + location.hash);
+  if (location.pathname === '/pair' || location.pathname.startsWith('/pair/')) {
+    return bootPair();
+  }
   const shareMatch = /^\/s\/([A-Za-z0-9_-]+)$/.exec(location.pathname);
   if (shareMatch) {
     return bootPublicShare(shareMatch[1]);

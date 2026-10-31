@@ -260,11 +260,17 @@
       const c1 = Math.min(p1.c, p2.c);
       const c2 = Math.max(p1.c, p2.c);
       const vals = [];
+      const rows2D = [];
       for (let r = r1; r <= r2; r++) {
+        const row = [];
         for (let c = c1; c <= c2; c++) {
-          vals.push(getCellVal(sheetIdx, cellKey(r, c)));
+          const v = getCellVal(sheetIdx, cellKey(r, c));
+          vals.push(v);
+          row.push(v);
         }
+        rows2D.push(row);
       }
+      vals._range2D = rows2D;
       return vals;
     }
 
@@ -285,6 +291,60 @@
       if (op === '>') return a > b;
       if (op === '>=') return a >= b;
       return false;
+    }
+
+    const clientAICache = new Map();
+    function evalAICellClient(type, p1, p2) {
+      const key = `${type}:${String(p1).trim().toLowerCase()}:${String(p2).trim().toLowerCase()}`;
+      if (clientAICache.has(key)) return clientAICache.get(key);
+
+      if (typeof require !== 'undefined') {
+        try {
+          const ai = require('../lib/ai_service');
+          let res = '';
+          if (type === 'extract') res = ai.localExtract(p1, p2);
+          else if (type === 'classify') res = ai.localClassify(p1, p2);
+          else if (type === 'translate') res = ai.localTranslate(p1, p2);
+          else res = ai.localPrompt(p1, p2);
+          clientAICache.set(key, res);
+          return res;
+        } catch (_) {}
+      }
+
+      if (typeof fetch !== 'undefined') {
+        fetch('/api/ai/cell', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-Rdrive': '1' },
+          body: JSON.stringify({ type, prompt: p1, text: p2, lang: p1, categories: p1 }),
+        })
+          .then((r) => (r.ok ? r.json() : null))
+          .then((data) => {
+            if (data && data.result !== undefined) {
+              clientAICache.set(key, data.result);
+              if (typeof renderSheet === 'function') renderSheet();
+            }
+          })
+          .catch(() => {});
+      }
+
+      let fallback = p2;
+      if (type === 'extract') {
+        if (/email/i.test(p1)) {
+          const m = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/.exec(p2);
+          fallback = m ? m[0] : '';
+        } else if (/phone/i.test(p1)) {
+          const m = /\d{3}[-. ]*\d{3}[-. ]*\d{4}/.exec(p2);
+          fallback = m ? m[0] : '';
+        } else if (/price|amount/i.test(p1)) {
+          const m = /[\$€£]?\s*(\d+(?:\.\d{2})?)/.exec(p2);
+          fallback = m ? m[1] : '';
+        }
+      } else if (type === 'classify') {
+        const cats = String(p1).split(/[,|/]/).map((c) => c.trim());
+        fallback = cats.find((c) => p2.toLowerCase().includes(c.toLowerCase())) || cats[0] || '';
+      }
+      clientAICache.set(key, fallback);
+      return fallback;
     }
 
     function callFunction(name, args) {
@@ -429,6 +489,51 @@
           return new Date().toISOString().slice(0, 10);
         case 'NOW':
           return new Date().toISOString().replace('T', ' ').slice(0, 19);
+        case 'SQL': {
+          const query = String(args[0] ?? '');
+          const table = (args[1] && args[1]._range2D) ? args[1]._range2D : (Array.isArray(args[1]) ? args[1] : null);
+          if (!table) throw new Error('#VALUE!');
+          const engine = (typeof executeSQL === 'function')
+            ? executeSQL
+            : (typeof window !== 'undefined' && window.executeSQL)
+              ? window.executeSQL
+              : (typeof require !== 'undefined' ? require('../lib/sql_engine').executeSQL : null);
+          if (!engine) throw new Error('#NAME?');
+          try {
+            const res = engine(query, table);
+            if (Array.isArray(res)) {
+              if (res.length === 0) return '';
+              if (typeof res[0] === 'object' && res[0] !== null) {
+                const firstVal = Object.values(res[0])[0];
+                return firstVal !== undefined ? firstVal : '';
+              }
+              return res[0];
+            }
+            return res ?? '';
+          } catch (e) {
+            throw new Error('#ERROR!');
+          }
+        }
+        case 'AI': {
+          const prompt = String(args[0] ?? '');
+          const ctx = args[1] != null ? String(args[1]) : '';
+          return evalAICellClient('prompt', prompt, ctx);
+        }
+        case 'AI_EXTRACT': {
+          const field = String(args[0] ?? '');
+          const text = String(args[1] ?? '');
+          return evalAICellClient('extract', field, text);
+        }
+        case 'AI_TRANSLATE': {
+          const text = String(args[0] ?? '');
+          const lang = String(args[1] ?? 'en');
+          return evalAICellClient('translate', lang, text);
+        }
+        case 'AI_CLASSIFY': {
+          const text = String(args[0] ?? '');
+          const cats = String(args[1] ?? '');
+          return evalAICellClient('classify', cats, text);
+        }
         default:
           throw new Error('#NAME?');
       }
@@ -1446,6 +1551,89 @@
       commitFormulaBar();
       performSave(false);
     });
+
+    const copilotBtn = document.getElementById('sheet-ai-copilot-btn');
+    const copilotDlg = document.getElementById('sheet-copilot-dialog');
+    const copilotPrompt = document.getElementById('sheet-copilot-prompt');
+    const copilotGen = document.getElementById('sheet-copilot-generate');
+    const copilotExplain = document.getElementById('sheet-copilot-explain');
+    const copilotRes = document.getElementById('sheet-copilot-result');
+    const copilotFormula = document.getElementById('sheet-copilot-formula');
+    const copilotExplanation = document.getElementById('sheet-copilot-explanation');
+    const copilotInsert = document.getElementById('sheet-copilot-insert');
+    const copilotClose = document.getElementById('sheet-copilot-close');
+
+    if (copilotBtn && copilotDlg) {
+      copilotBtn.onclick = () => {
+        copilotPrompt.value = '';
+        copilotRes.hidden = true;
+        copilotDlg.showModal();
+        copilotPrompt.focus();
+      };
+      if (copilotClose) copilotClose.onclick = () => copilotDlg.close();
+
+      if (copilotGen) {
+        copilotGen.onclick = async () => {
+          const prompt = copilotPrompt.value.trim();
+          if (!prompt) return;
+          copilotGen.disabled = true;
+          try {
+            const r = await fetch('/api/ai/formula-copilot', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', 'X-Rdrive': '1' },
+              body: JSON.stringify({ prompt, action: 'generate' }),
+            }).then((res) => res.json());
+            if (r.formula) {
+              copilotFormula.textContent = r.formula;
+              copilotExplanation.textContent = r.explanation || '';
+              copilotRes.hidden = false;
+            }
+          } catch (err) {
+            if (window.rdriveToast) window.rdriveToast('Could not generate formula.');
+          } finally {
+            copilotGen.disabled = false;
+          }
+        };
+      }
+
+      if (copilotExplain) {
+        copilotExplain.onclick = async () => {
+          const f = formulaInput.value.trim();
+          if (!f) {
+            if (window.rdriveToast) window.rdriveToast('Active cell has no formula to explain.');
+            return;
+          }
+          copilotExplain.disabled = true;
+          try {
+            const r = await fetch('/api/ai/formula-copilot', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', 'X-Rdrive': '1' },
+              body: JSON.stringify({ formula: f, action: 'explain' }),
+            }).then((res) => res.json());
+            if (r.explanation) {
+              copilotFormula.textContent = f;
+              copilotExplanation.textContent = r.explanation;
+              copilotRes.hidden = false;
+            }
+          } catch (err) {
+            if (window.rdriveToast) window.rdriveToast('Could not explain formula.');
+          } finally {
+            copilotExplain.disabled = false;
+          }
+        };
+      }
+
+      if (copilotInsert) {
+        copilotInsert.onclick = () => {
+          const formula = copilotFormula.textContent.trim();
+          if (formula) {
+            formulaInput.value = formula;
+            commitFormulaBar();
+            copilotDlg.close();
+          }
+        };
+      }
+    }
 
     formulaInput.onblur = () => commitFormulaBar();
 
