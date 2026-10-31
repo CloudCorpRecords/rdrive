@@ -1,6 +1,6 @@
 {
   "name": "rdrive",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "description": "Self-hosted, open source file drive. Run it on one machine, reach it securely from your other devices.",
   "main": "server.js",
   "scripts": {

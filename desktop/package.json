@@ -1,7 +1,7 @@
 {
   "name": "rdrive-desktop",
   "productName": "rdrive",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "description": "Desktop app for rdrive: host your drive on this computer, or open a drive hosted elsewhere.",
   "main": "main.js",
   "author": "rdrive contributors",
