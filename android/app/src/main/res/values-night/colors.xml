@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Night garden, dark: matches the page background in public/style.css. -->
+    <color name="page_bg">#0F1613</color>
+    <color name="page_text">#E7F1EB</color>
+</resources>

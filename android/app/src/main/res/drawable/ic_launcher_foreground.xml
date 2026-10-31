@@ -11,10 +11,10 @@
         android:translateX="6"
         android:translateY="5.25">
         <path
-            android:fillColor="#FFFFFF"
+            android:fillColor="#7FD6A8"
             android:pathData="M8,11.5a2,2 0 0,1 2,-2h4l2,2h6a2,2 0 0,1 2,2V21a2,2 0 0,1 -2,2H10a2,2 0 0,1 -2,-2z" />
         <path
-            android:strokeColor="#2F6FDE"
+            android:strokeColor="#17322A"
             android:strokeWidth="1.8"
             android:strokeLineCap="round"
             android:strokeLineJoin="round"

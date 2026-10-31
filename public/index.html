@@ -69,7 +69,7 @@
     <header class="topbar">
       <a class="brand" href="#/"><img src="/icon.svg" alt="" width="24" height="24"> rdrive</a>
       <div class="search-box">
-        <input id="search-input" type="search" placeholder="Search files &amp; spreadsheets…" aria-label="Search files" autocomplete="off">
+        <input id="search-input" type="search" placeholder="Search your drive" aria-label="Search files" autocomplete="off">
       </div>
       <div class="topbar-right">
         <span id="usage" class="muted small"></span>
@@ -86,6 +86,7 @@
           <span id="selection-count" class="muted small"></span>
           <button class="btn" id="move-selected">Move</button>
           <button class="btn btn-danger" id="delete-selected">Delete</button>
+          <button class="btn btn-ghost" id="clear-selected">Cancel</button>
         </div>
         <button class="btn" id="new-doc" title="Create a new RDocs document">+ Document</button>
         <button class="btn" id="new-sheet" title="Create a new RDrive Spreadsheet">+ Spreadsheet</button>
@@ -109,10 +110,21 @@
       </div>
       <div id="rows"></div>
       <div id="empty" class="empty" hidden>
+        <div class="empty-art" data-icon="folder"></div>
         <p><strong id="empty-title">This folder is empty.</strong></p>
         <p class="muted" id="empty-sub">Drop files or folders here, create a Spreadsheet, or use Upload.</p>
       </div>
     </section>
+
+    <!-- Phones: the + button and the bottom bar (hidden on wider screens by style.css). -->
+    <button class="fab" id="fab" type="button" aria-label="New" title="New"></button>
+    <nav class="bottom-nav" id="bottom-nav" aria-label="Sections">
+      <button type="button" data-nav="files" class="active"><span data-icon="folder"></span>Files</button>
+      <button type="button" data-nav="search"><span data-icon="search"></span>Search</button>
+      <button type="button" data-nav="trash"><span data-icon="trash"></span>Trash</button>
+      <button type="button" data-nav="you"><span data-icon="user"></span>You</button>
+    </nav>
+    <input id="camera-input" type="file" accept="image/*,video/*" capture="environment" hidden>
 
     <div id="drop-overlay" class="drop-overlay" hidden><div>Drop to upload here</div></div>
     <aside id="uploads" class="uploads" hidden>
@@ -121,16 +133,29 @@
     </aside>
   </div>
 
-  <!-- Row menu -->
+  <!-- Row menu (a bottom sheet on phones) -->
+  <div id="sheet-backdrop" class="sheet-backdrop" hidden></div>
   <div id="menu" class="menu" role="menu" hidden>
-    <button role="menuitem" data-act="open">Open</button>
-    <button role="menuitem" data-act="convert" id="menu-convert" hidden>Open as RDoc</button>
-    <button role="menuitem" data-act="share">Share link…</button>
-    <button role="menuitem" data-act="download" id="menu-download">Download</button>
-    <button role="menuitem" data-act="copy">Make a copy</button>
-    <button role="menuitem" data-act="rename">Rename</button>
-    <button role="menuitem" data-act="move">Move to…</button>
-    <button role="menuitem" data-act="delete" class="danger">Delete</button>
+    <div class="menu-title" id="menu-title"></div>
+    <button role="menuitem" data-act="open"><span data-icon="open"></span>Open</button>
+    <button role="menuitem" data-act="convert" id="menu-convert" hidden><span data-icon="edit"></span><span class="label">Open as RDoc</span></button>
+    <button role="menuitem" data-act="share"><span data-icon="share"></span>Share link…</button>
+    <button role="menuitem" data-act="download" id="menu-download"><span data-icon="download"></span><span class="label">Download</span></button>
+    <button role="menuitem" data-act="copy"><span data-icon="copy"></span>Make a copy</button>
+    <button role="menuitem" data-act="rename"><span data-icon="edit"></span>Rename</button>
+    <button role="menuitem" data-act="move"><span data-icon="move"></span>Move to…</button>
+    <button role="menuitem" data-act="delete" class="danger"><span data-icon="trash"></span>Delete</button>
+  </div>
+
+  <!-- "New" sheet behind the + button -->
+  <div id="new-menu" class="menu" role="menu" hidden>
+    <div class="menu-title"><span>Add to this folder</span></div>
+    <button role="menuitem" data-new="doc"><span data-icon="doc"></span>Document</button>
+    <button role="menuitem" data-new="sheet"><span data-icon="sheet"></span>Spreadsheet</button>
+    <button role="menuitem" data-new="folder"><span data-icon="folder"></span>Folder</button>
+    <button role="menuitem" data-new="upload"><span data-icon="upload"></span>Upload files</button>
+    <button role="menuitem" data-new="camera"><span data-icon="camera"></span>Take a photo</button>
+    <button role="menuitem" data-new="zip"><span data-icon="zip"></span>Download this folder</button>
   </div>
 
   <!-- Generic text prompt -->
@@ -375,6 +400,24 @@
       <button class="btn btn-ghost" id="account-close">Close</button>
     </div>
     <div class="account-body">
+      <section class="you-card">
+        <div class="you-row">
+          <span class="you-avatar" id="you-avatar"></span>
+          <div class="you-text"><strong id="you-name"></strong><span class="muted small" id="you-usage"></span></div>
+          <button class="btn" id="you-signout" type="button">Sign out</button>
+        </div>
+      </section>
+      <!-- Shown only inside the Android app (window.RDriveApp). -->
+      <section id="phone-section" hidden>
+        <h3>This phone</h3>
+        <div class="phone-actions">
+          <button class="phone-action" type="button" data-phone="autoUpload"><span data-icon="camera"></span><span><strong>Auto-upload a folder</strong><span class="muted small" id="phone-sync-status"></span></span></button>
+          <button class="phone-action" type="button" data-phone="uploadNow" id="phone-upload-now"><span data-icon="upload"></span><span><strong>Upload new photos now</strong></span></button>
+          <button class="phone-action" type="button" data-phone="stopAutoUpload" id="phone-stop"><span data-icon="trash"></span><span><strong>Stop auto-upload</strong></span></button>
+          <button class="phone-action" type="button" data-phone="checkForUpdates"><span data-icon="download"></span><span><strong>Check for updates</strong><span class="muted small" id="phone-version"></span></span></button>
+          <button class="phone-action" type="button" data-phone="changeAddress"><span data-icon="edit"></span><span><strong>Change drive address</strong></span></button>
+        </div>
+      </section>
       <section>
         <div class="section-head">
           <h3>Signed-in devices</h3>

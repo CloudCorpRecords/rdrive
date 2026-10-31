@@ -10,11 +10,11 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.Environment
-import android.view.Menu
-import android.view.MenuItem
+import android.provider.DocumentsContract
 import android.view.View
 import android.view.ViewGroup
 import android.webkit.CookieManager
+import android.webkit.JavascriptInterface
 import android.webkit.URLUtil
 import android.webkit.ValueCallback
 import android.webkit.WebChromeClient
@@ -28,6 +28,7 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
 import android.window.OnBackInvokedDispatcher
+import org.json.JSONObject
 import java.io.File
 
 /** The drive itself (the same web app as on a computer) in a locked-down WebView, plus the app menu. */
@@ -35,6 +36,7 @@ class MainActivity : Activity() {
 
     private var web: WebView? = null
     private var fileCallback: ValueCallback<Array<Uri>>? = null
+    private var cameraOutput: Uri? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -90,7 +92,6 @@ class MainActivity : Activity() {
         val container = android.widget.FrameLayout(this).apply { addView(layout) }
         setContentView(container)
         applyInsets(container)
-        invalidateOptionsMenu()
     }
 
     // ---------- the drive ----------
@@ -130,6 +131,26 @@ class MainActivity : Activity() {
             override fun onShowFileChooser(view: WebView, callback: ValueCallback<Array<Uri>>, params: FileChooserParams): Boolean {
                 fileCallback?.onReceiveValue(null)
                 fileCallback = callback
+                // "Take a photo": open the camera; the picture is saved to Pictures/rdrive and uploaded.
+                if (params.isCaptureEnabled && Build.VERSION.SDK_INT >= 29) {
+                    val values = android.content.ContentValues().apply {
+                        put(android.provider.MediaStore.Images.Media.DISPLAY_NAME, "rdrive-${System.currentTimeMillis()}.jpg")
+                        put(android.provider.MediaStore.Images.Media.MIME_TYPE, "image/jpeg")
+                        put(android.provider.MediaStore.Images.Media.RELATIVE_PATH, "Pictures/rdrive")
+                    }
+                    val out = contentResolver.insert(android.provider.MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)
+                    if (out != null) {
+                        cameraOutput = out
+                        val shoot = Intent(android.provider.MediaStore.ACTION_IMAGE_CAPTURE).putExtra(android.provider.MediaStore.EXTRA_OUTPUT, out)
+                        try {
+                            startActivityForResult(shoot, REQ_CAMERA)
+                            return true
+                        } catch (_: ActivityNotFoundException) {
+                            contentResolver.delete(out, null, null)
+                            cameraOutput = null
+                        }
+                    }
+                }
                 val pick = Intent(Intent.ACTION_GET_CONTENT).apply {
                     addCategory(Intent.CATEGORY_OPENABLE)
                     type = "*/*"
@@ -158,10 +179,16 @@ class MainActivity : Activity() {
             getSystemService(DownloadManager::class.java).enqueue(req)
             Toast.makeText(this, "Downloading $name", Toast.LENGTH_SHORT).show()
         }
-        setContentView(w)
-        applyInsets(w)
+        w.addJavascriptInterface(PhoneBridge(host), "RDriveApp")
+        w.setBackgroundColor(getColor(R.color.page_bg)) // no white flash before the page paints
+        // WebView ignores its own padding, so the system-bar spacing goes on a container around it.
+        val frame = android.widget.FrameLayout(this).apply {
+            setBackgroundColor(getColor(R.color.page_bg))
+            addView(w, ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
+        }
+        setContentView(frame)
+        applyInsets(frame)
         if (state == null || w.restoreState(state) == null) w.loadUrl(url)
-        invalidateOptionsMenu()
     }
 
     private fun isGithubSignIn(u: Uri): Boolean {
@@ -169,17 +196,19 @@ class MainActivity : Activity() {
         return p.startsWith("/login") || p.startsWith("/session")
     }
 
-    // Keep content clear of the status bar, app bar and navigation bar (Android 15+ draws edge to edge,
-    // so the app bar overlaps the content unless we leave room for it).
+    // There's no title bar: the page draws its own header. Keep it clear of the status and navigation
+    // bars (Android 15+ draws edge to edge), and match the bar icons to light or dark mode.
     private fun applyInsets(v: View) {
-        if (Build.VERSION.SDK_INT < 35) return
-        val tv = android.util.TypedValue()
-        val appBar = if (theme.resolveAttribute(android.R.attr.actionBarSize, tv, true)) {
-            android.util.TypedValue.complexToDimensionPixelSize(tv.data, resources.displayMetrics)
-        } else 0
+        window.decorView.setBackgroundColor(getColor(R.color.page_bg))
+        if (Build.VERSION.SDK_INT >= 30) {
+            val night = (resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK) == android.content.res.Configuration.UI_MODE_NIGHT_YES
+            val light = android.view.WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS or android.view.WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS
+            window.insetsController?.setSystemBarsAppearance(if (night) 0 else light, light)
+        }
+        if (Build.VERSION.SDK_INT < 30) return
         v.setOnApplyWindowInsetsListener { view, insets ->
             val bars = insets.getInsets(android.view.WindowInsets.Type.systemBars() or android.view.WindowInsets.Type.ime())
-            view.setPadding(bars.left, bars.top + appBar, bars.right, bars.bottom)
+            view.setPadding(bars.left, bars.top, bars.right, bars.bottom)
             insets
         }
         (v.parent as? ViewGroup)?.requestApplyInsets()
@@ -306,44 +335,47 @@ class MainActivity : Activity() {
         super.onDestroy()
     }
 
-    // ---------- menu ----------
+    // ---------- the page's "You → This phone" section ----------
 
-    override fun onCreateOptionsMenu(menu: Menu): Boolean {
-        if (web == null) return false
-        menuInflater.inflate(R.menu.main, menu)
-        return true
-    }
-
-    override fun onPrepareOptionsMenu(menu: Menu): Boolean {
-        val syncing = Prefs.syncTree(this) != null
-        menu.findItem(R.id.upload_now)?.isVisible = syncing
-        menu.findItem(R.id.stop_folder)?.isVisible = syncing
-        return super.onPrepareOptionsMenu(menu)
-    }
-
-    override fun onOptionsItemSelected(item: MenuItem): Boolean {
-        when (item.itemId) {
-            R.id.new_document -> {
-                web?.evaluateJavascript("window.rdriveCreateDocument && window.rdriveCreateDocument()", null)
+    /**
+     * Exposed to the drive's page as window.RDriveApp. The WebView can also show GitHub's sign-in pages,
+     * so every call first checks that the page asking is your drive.
+     */
+    inner class PhoneBridge(private val driveHost: String?) {
+        private fun fromDrive(action: () -> Unit) {
+            runOnUiThread {
+                val current = web?.url?.let { Uri.parse(it) }
+                if (current?.scheme == "https" && current.host == driveHost) action()
             }
-            R.id.new_spreadsheet -> {
-                web?.evaluateJavascript("window.rdriveCreateSpreadsheet && window.rdriveCreateSpreadsheet()", null)
-            }
-            R.id.upload_folder -> {
-                askNotificationPermission()
-                startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT_TREE), REQ_TREE)
-            }
-            R.id.upload_now -> {
-                FolderSyncWorker.runNow(this)
-                Toast.makeText(this, "Checking for new files…", Toast.LENGTH_SHORT).show()
-            }
-            R.id.stop_folder -> stopAutoUpload()
-            R.id.reload -> web?.reload()
-            R.id.check_updates -> checkForUpdates(manual = true)
-            R.id.change_address -> showSetup()
-            else -> return super.onOptionsItemSelected(item)
         }
-        return true
+
+        @JavascriptInterface
+        fun status(): String {
+            val tree = Prefs.syncTree(this@MainActivity)
+            val folder = tree?.let { DocumentsContract.getTreeDocumentId(it).substringAfter(':').substringAfterLast('/').ifBlank { "Phone storage" } }
+            return JSONObject().put("syncFolder", folder ?: JSONObject.NULL).put("version", Updater.currentVersion(this@MainActivity)).toString()
+        }
+
+        @JavascriptInterface
+        fun autoUpload() = fromDrive {
+            askNotificationPermission()
+            startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT_TREE), REQ_TREE)
+        }
+
+        @JavascriptInterface
+        fun uploadNow() = fromDrive {
+            FolderSyncWorker.runNow(this@MainActivity)
+            Toast.makeText(this@MainActivity, "Checking for new files…", Toast.LENGTH_SHORT).show()
+        }
+
+        @JavascriptInterface
+        fun stopAutoUpload() = fromDrive { this@MainActivity.stopAutoUpload() }
+
+        @JavascriptInterface
+        fun checkForUpdates() = fromDrive { this@MainActivity.checkForUpdates(manual = true) }
+
+        @JavascriptInterface
+        fun changeAddress() = fromDrive { showSetup() }
     }
 
     private fun stopAutoUpload() {
@@ -352,7 +384,6 @@ class MainActivity : Activity() {
             runCatching { contentResolver.releasePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION) }
         }
         Prefs.setSyncTree(this, null)
-        invalidateOptionsMenu()
         Toast.makeText(this, "Auto-upload stopped.", Toast.LENGTH_SHORT).show()
     }
 
@@ -364,6 +395,18 @@ class MainActivity : Activity() {
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
         when (requestCode) {
+            REQ_CAMERA -> {
+                val cb = fileCallback ?: return
+                fileCallback = null
+                val out = cameraOutput
+                cameraOutput = null
+                if (resultCode == RESULT_OK && out != null) {
+                    cb.onReceiveValue(arrayOf(out))
+                } else {
+                    out?.let { runCatching { contentResolver.delete(it, null, null) } } // cancelled: drop the empty entry
+                    cb.onReceiveValue(null)
+                }
+            }
             REQ_FILES -> {
                 val cb = fileCallback ?: return
                 fileCallback = null
@@ -377,7 +420,6 @@ class MainActivity : Activity() {
                 if (resultCode != RESULT_OK) return
                 contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
                 Prefs.setSyncTree(this, uri)
-                invalidateOptionsMenu()
                 AlertDialog.Builder(this)
                     .setTitle("Auto-upload this folder")
                     .setMessage("New files in this folder will be uploaded to rdrive → Phone, about every 15 minutes when you're online.\n\nAlso upload the files that are already in it?")
@@ -399,5 +441,6 @@ class MainActivity : Activity() {
         private const val REQ_FILES = 1
         private const val REQ_TREE = 2
         private const val REQ_NOTIFY = 3
+        private const val REQ_CAMERA = 4
     }
 }
