@@ -48,8 +48,8 @@ object Updater {
 
     private fun get(url: String): HttpURLConnection {
         val c = URL(url).openConnection() as HttpURLConnection
-        c.connectTimeout = 15_000
-        c.readTimeout = 60_000
+        c.connectTimeout = 20_000
+        c.readTimeout = 30_000
         c.instanceFollowRedirects = true
         c.setRequestProperty("User-Agent", "rdrive-android-updater")
         c.setRequestProperty("Accept", "application/vnd.github+json")
@@ -79,42 +79,59 @@ object Updater {
     }
 
     /** Blocking: downloads the release's APK into the app's cache and checks it against SHA256SUMS.txt. */
-    fun download(ctx: Context, rel: Release, onProgress: (Int) -> Unit): File {
+    /** onProgress(text) gets e.g. "42%" or "1.2 MB" when the size isn't known. A stalled download is retried. */
+    fun download(ctx: Context, rel: Release, onProgress: (String) -> Unit): File {
         val apkUrl = rel.apkUrl ?: throw IOException("This release has no Android app.")
         val sumsUrl = rel.sumsUrl ?: throw IOException("This release has no SHA256SUMS.txt to check the download against.")
         val dir = File(ctx.cacheDir, "updates").apply { deleteRecursively(); mkdirs() }
         val file = File(dir, rel.apkName!!)
-        val c = get(apkUrl)
-        if (c.responseCode != 200) throw IOException("Download failed (${c.responseCode})")
+        var digest: ByteArray? = null
+        for (attempt in 1..3) {
+            try {
+                digest = downloadOnce(apkUrl, file, onProgress)
+                break
+            } catch (e: IOException) {
+                if (attempt == 3) throw IOException("The download kept stopping (${e.message}). Check your connection and try again.")
+                onProgress("retrying…")
+                Thread.sleep(1500L * attempt)
+            }
+        }
+        val sums = get(sumsUrl).inputStream.bufferedReader().use { it.readText() }
+        val want = sums.lines().map { it.trim().split(Regex("\\s+")) }.firstOrNull { it.size >= 2 && it.last() == rel.apkName }?.first()?.lowercase()
+        val got = digest!!.joinToString("") { "%02x".format(it) }
+        if (want == null || want != got) {
+            file.delete()
+            throw IOException("The download's checksum doesn't match the release.")
+        }
+        return file
+    }
+
+    // One attempt; returns the file's SHA-256.
+    private fun downloadOnce(url: String, file: File, onProgress: (String) -> Unit): ByteArray {
+        val c = get(url)
+        if (c.responseCode != 200) throw IOException("download failed (${c.responseCode})")
         val total = c.contentLengthLong
         val md = MessageDigest.getInstance("SHA-256")
         c.inputStream.use { input ->
             file.outputStream().use { out ->
                 val buf = ByteArray(64 * 1024)
                 var got = 0L
-                var lastPct = -1
+                var last = ""
                 while (true) {
                     val n = input.read(buf)
                     if (n < 0) break
                     out.write(buf, 0, n)
                     md.update(buf, 0, n)
                     got += n
-                    val pct = if (total > 0) ((got * 100) / total).toInt() else -1
-                    if (pct != lastPct) {
-                        lastPct = pct
-                        onProgress(pct)
+                    val text = if (total > 0) "${(got * 100) / total}%" else "%.1f MB".format(got / 1048576.0)
+                    if (text != last) {
+                        last = text
+                        onProgress(text)
                     }
                 }
             }
         }
-        val sums = get(sumsUrl).inputStream.bufferedReader().use { it.readText() }
-        val want = sums.lines().map { it.trim().split(Regex("\\s+")) }.firstOrNull { it.size >= 2 && it.last() == rel.apkName }?.first()?.lowercase()
-        val got = md.digest().joinToString("") { "%02x".format(it) }
-        if (want == null || want != got) {
-            file.delete()
-            throw IOException("The download's checksum doesn't match the release.")
-        }
-        return file
+        return md.digest()
     }
 
     /** Hands the checked APK to Android's installer; Android asks you to confirm. */
@@ -136,6 +153,28 @@ object Updater {
         }
     }
 
+    /** A plain-language reason for a failed install: (short title, what to do). */
+    fun explainFailure(status: Int, detail: String): Pair<String, String> = when (status) {
+        PackageInstaller.STATUS_FAILURE_BLOCKED ->
+            "Google Play Protect stopped the rdrive update" to
+                "rdrive comes from GitHub, not the Play Store, so Play Protect asks first. Try again (⋮ → Check for updates) and choose More details → Install anyway."
+        PackageInstaller.STATUS_FAILURE_ABORTED ->
+            "rdrive update cancelled" to "The update was cancelled before it finished. Try again from ⋮ → Check for updates."
+        PackageInstaller.STATUS_FAILURE_CONFLICT ->
+            "rdrive update couldn't replace the installed app" to
+                "The download isn't signed with the same key as the installed app, so Android refused it. $detail".trim()
+        PackageInstaller.STATUS_FAILURE_STORAGE ->
+            "Not enough space for the rdrive update" to "Free up some storage, then try again."
+        else -> "rdrive update failed" to (detail.ifBlank { "Android didn't say why." } + " Try again from ⋮ → Check for updates.")
+    }
+
+    // The update the user asked for, kept across restarts: Android restarts the app when you allow
+    // "Install unknown apps", so it can't just live in memory.
+    private fun prefs(ctx: Context) = ctx.getSharedPreferences("rdrive", Context.MODE_PRIVATE)
+    fun setPending(ctx: Context, version: String) = prefs(ctx).edit().putString("pendingUpdate", version).apply()
+    fun pending(ctx: Context): String? = prefs(ctx).getString("pendingUpdate", null)
+    fun clearPending(ctx: Context) = prefs(ctx).edit().remove("pendingUpdate").apply()
+
     /** Daily background check that posts a notification when a new version is out. */
     fun schedule(ctx: Context) {
         val req = PeriodicWorkRequestBuilder<UpdateCheckWorker>(1, TimeUnit.DAYS)
@@ -156,10 +195,14 @@ class InstallResultReceiver : BroadcastReceiver() {
                 confirm?.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 if (confirm != null) ctx.startActivity(confirm)
             }
-            PackageInstaller.STATUS_SUCCESS -> Unit // the app restarts as the new version
+            PackageInstaller.STATUS_SUCCESS -> Updater.clearPending(ctx) // the app restarts as the new version
             else -> {
-                val msg = intent.getStringExtra(PackageInstaller.EXTRA_STATUS_MESSAGE) ?: "unknown error"
-                Toast.makeText(ctx, "rdrive update failed: $msg", Toast.LENGTH_LONG).show()
+                val status = intent.getIntExtra(PackageInstaller.EXTRA_STATUS, PackageInstaller.STATUS_FAILURE)
+                val detail = intent.getStringExtra(PackageInstaller.EXTRA_STATUS_MESSAGE) ?: ""
+                val (title, text) = Updater.explainFailure(status, detail)
+                // A toast disappears quickly; the notification stays until it's read.
+                Toast.makeText(ctx, title, Toast.LENGTH_LONG).show()
+                Notify.post(ctx, Notify.ID_UPDATE, title, text)
             }
         }
     }

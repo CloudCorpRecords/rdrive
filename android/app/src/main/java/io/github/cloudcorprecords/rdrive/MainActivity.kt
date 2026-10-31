@@ -200,17 +200,24 @@ class MainActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
-        // Back from "Install unknown apps": carry on with the update the user asked for.
-        val rel = pendingUpdate
-        if (rel != null && packageManager.canRequestPackageInstalls()) {
-            pendingUpdate = null
-            downloadAndInstall(rel)
+        // Back from "Install unknown apps" (Android may have restarted the app meanwhile):
+        // carry on with the update the user asked for.
+        if (Updater.pending(this) != null && packageManager.canRequestPackageInstalls() && !updating) {
+            Updater.clearPending(this)
+            updating = true
+            Thread {
+                val rel = runCatching { Updater.latest() }.getOrNull()
+                runOnUiThread {
+                    updating = false
+                    if (rel != null && rel.apkUrl != null && Updater.isNewer(rel.version, Updater.currentVersion(this))) downloadAndInstall(rel)
+                }
+            }.start()
         }
     }
 
     // ---------- updates ----------
 
-    private var pendingUpdate: Updater.Release? = null
+    private var updating = false
 
     /** Checks quietly at most twice a day; only speaks up when there's something newer. */
     private fun maybeCheckForUpdates() {
@@ -250,7 +257,7 @@ class MainActivity : Activity() {
                 .setTitle("Allow rdrive to install updates")
                 .setMessage("Android needs your OK once: on the next screen, turn on \"Allow from this source\", then come back. Android still asks you to confirm each update.")
                 .setPositiveButton("Open settings") { _, _ ->
-                    pendingUpdate = rel
+                    Updater.setPending(this, rel.version)
                     startActivity(Intent(android.provider.Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:$packageName")))
                 }
                 .setNegativeButton("Cancel", null)
@@ -268,15 +275,22 @@ class MainActivity : Activity() {
             .show()
         Thread {
             val result = runCatching {
-                val apk = Updater.download(this, rel) { pct ->
-                    if (pct >= 0) runOnUiThread { progress.setMessage("Downloading ${rel.version}… $pct%") }
+                val apk = Updater.download(this, rel) { text ->
+                    runOnUiThread { progress.setMessage("Downloading ${rel.version}… $text") }
                 }
-                runOnUiThread { progress.setMessage("Checked. Installing…") }
+                runOnUiThread { progress.setMessage("Checked. Handing it to Android to install…") }
                 Updater.install(this, apk)
             }
             runOnUiThread {
                 progress.dismiss()
-                result.exceptionOrNull()?.let { Toast.makeText(this, "Update failed: ${it.message}", Toast.LENGTH_LONG).show() }
+                result.exceptionOrNull()?.let {
+                    if (!isFinishing) AlertDialog.Builder(this)
+                        .setTitle("The rdrive update didn't download")
+                        .setMessage(it.message ?: "Something went wrong.")
+                        .setPositiveButton("Try again") { _, _ -> downloadAndInstall(rel) }
+                        .setNegativeButton("Later", null)
+                        .show()
+                }
             }
         }.start()
     }
