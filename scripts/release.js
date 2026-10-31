@@ -76,7 +76,7 @@ Every file is listed in \`SHA256SUMS.txt\`; the updaters refuse a download that 
 function sh(cmd, args, opts = {}) {
   // Windows runs npm/gradlew as .cmd/.bat scripts, which need a shell; git and gh don't (and their
   // arguments, like commit messages, contain spaces a shell would split).
-  const shell = process.platform === 'win32' && /^(npm|gradlew\.bat)$/.test(cmd);
+  const shell = process.platform === 'win32' && (cmd === 'npm' || /\.(bat|cmd)$/i.test(cmd));
   const r = spawnSync(cmd, args, { cwd: ROOT, encoding: 'utf8', shell, ...opts });
   if (opts.check !== false && r.status !== 0) {
     throw new Error(`${cmd} ${args.join(' ')} failed:\n${(r.stderr || r.stdout || '').trim().slice(-2000)}`);
@@ -126,7 +126,8 @@ function buildAndroid(version) {
     if (fs.existsSync(guess)) env.ANDROID_HOME = guess;
   }
   console.log('  building the Android app (signed with your key)…');
-  const gradlew = process.platform === 'win32' ? 'gradlew.bat' : './gradlew';
+  // Full path: Windows may be set not to run programs from the current folder by name.
+  const gradlew = path.join(ROOT, 'android', process.platform === 'win32' ? 'gradlew.bat' : 'gradlew');
   sh(gradlew, ['--console=plain', '-q', 'testDebugUnitTest', 'assembleRelease'], { cwd: path.join(ROOT, 'android'), env });
   const built = path.join(ROOT, 'android', 'app', 'build', 'outputs', 'apk', 'release', 'app-release.apk');
   const out = path.join(os.tmpdir(), `rdrive-${version}.apk`);
