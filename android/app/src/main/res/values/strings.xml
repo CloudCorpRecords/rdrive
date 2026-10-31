@@ -13,5 +13,6 @@
     <string name="menu_stop_folder">Stop auto-upload</string>
     <string name="menu_change_address">Change drive address</string>
     <string name="menu_reload">Reload</string>
+    <string name="menu_check_updates">Check for updates</string>
     <string name="notif_channel">Uploads</string>
 </resources>

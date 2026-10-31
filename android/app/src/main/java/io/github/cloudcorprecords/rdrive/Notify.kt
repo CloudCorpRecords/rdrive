@@ -15,6 +15,7 @@ object Notify {
     const val ID_SIGN_IN = 1
     const val ID_FOLDER = 2
     const val ID_FAILED = 3
+    const val ID_UPDATE = 4
 
     fun post(ctx: Context, id: Int, title: String, text: String) {
         if (Build.VERSION.SDK_INT >= 33 &&

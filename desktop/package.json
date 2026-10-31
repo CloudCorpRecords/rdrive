@@ -28,6 +28,8 @@
     },
     "files": [
       "main.js",
+      "updater.js",
+      "detect.js",
       "preload.js",
       "settings.js",
       "setup.html",
@@ -45,20 +47,24 @@
       { "from": "../node_modules/node-forge", "to": "server/node_modules/node-forge" }
     ],
     "win": {
-      "target": "nsis",
-      "icon": "build/icon.png"
+      "target": [{ "target": "nsis", "arch": ["x64"] }],
+      "icon": "build/icon.png",
+      "artifactName": "rdrive-${version}-x64-setup.exe"
     },
     "nsis": {
       "oneClick": false,
       "perMachine": false,
       "allowToChangeInstallationDirectory": true,
-      "createDesktopShortcut": true
+      "createDesktopShortcut": true,
+      "deleteAppDataOnUninstall": false,
+      "runAfterFinish": true
     },
     "mac": {
       "target": [{ "target": "dmg", "arch": ["arm64", "x64"] }],
       "category": "public.app-category.productivity",
       "identity": "-",
-      "icon": "build/icon.png"
+      "icon": "build/icon.png",
+      "artifactName": "rdrive-${version}-${arch}.${ext}"
     }
   }
 }

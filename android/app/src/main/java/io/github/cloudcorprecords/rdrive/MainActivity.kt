@@ -39,6 +39,8 @@ class MainActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         cleanOldOutbox()
+        Updater.schedule(this)
+        maybeCheckForUpdates()
         if (Build.VERSION.SDK_INT >= 33) {
             onBackInvokedDispatcher.registerOnBackInvokedCallback(OnBackInvokedDispatcher.PRIORITY_DEFAULT) { goBack() }
         }
@@ -196,6 +198,89 @@ class MainActivity : Activity() {
         web?.saveState(outState)
     }
 
+    override fun onResume() {
+        super.onResume()
+        // Back from "Install unknown apps": carry on with the update the user asked for.
+        val rel = pendingUpdate
+        if (rel != null && packageManager.canRequestPackageInstalls()) {
+            pendingUpdate = null
+            downloadAndInstall(rel)
+        }
+    }
+
+    // ---------- updates ----------
+
+    private var pendingUpdate: Updater.Release? = null
+
+    /** Checks quietly at most twice a day; only speaks up when there's something newer. */
+    private fun maybeCheckForUpdates() {
+        val prefs = getSharedPreferences("rdrive", MODE_PRIVATE)
+        if (System.currentTimeMillis() - prefs.getLong("lastUpdateCheck", 0) < 12 * 3600 * 1000L) return
+        prefs.edit().putLong("lastUpdateCheck", System.currentTimeMillis()).apply()
+        checkForUpdates(manual = false)
+    }
+
+    private fun checkForUpdates(manual: Boolean) {
+        if (manual) Toast.makeText(this, "Checking for updates…", Toast.LENGTH_SHORT).show()
+        Thread {
+            val result = runCatching { Updater.latest() }
+            runOnUiThread {
+                if (isFinishing) return@runOnUiThread
+                val current = Updater.currentVersion(this)
+                val rel = result.getOrNull()
+                when {
+                    result.isFailure -> if (manual) Toast.makeText(this, "Couldn't check for updates: ${result.exceptionOrNull()?.message}", Toast.LENGTH_LONG).show()
+                    rel == null || rel.apkUrl == null || !Updater.isNewer(rel.version, current) ->
+                        if (manual) AlertDialog.Builder(this).setTitle("rdrive is up to date").setMessage("You have the newest version, $current.").setPositiveButton("OK", null).show()
+                    else -> AlertDialog.Builder(this)
+                        .setTitle("rdrive ${rel.version} is available")
+                        .setMessage("You have $current. Update downloads it, checks it, and asks Android to install it. Your settings and sign-in stay as they are.")
+                        .setPositiveButton("Update") { _, _ -> startUpdate(rel) }
+                        .setNegativeButton("Later", null)
+                        .show()
+                }
+            }
+        }.start()
+    }
+
+    private fun startUpdate(rel: Updater.Release) {
+        if (!packageManager.canRequestPackageInstalls()) {
+            // Android asks once whether rdrive may install updates; the user flips the switch themselves.
+            AlertDialog.Builder(this)
+                .setTitle("Allow rdrive to install updates")
+                .setMessage("Android needs your OK once: on the next screen, turn on \"Allow from this source\", then come back. Android still asks you to confirm each update.")
+                .setPositiveButton("Open settings") { _, _ ->
+                    pendingUpdate = rel
+                    startActivity(Intent(android.provider.Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:$packageName")))
+                }
+                .setNegativeButton("Cancel", null)
+                .show()
+            return
+        }
+        downloadAndInstall(rel)
+    }
+
+    private fun downloadAndInstall(rel: Updater.Release) {
+        val progress = AlertDialog.Builder(this)
+            .setTitle("Updating rdrive")
+            .setMessage("Downloading ${rel.version}…")
+            .setCancelable(false)
+            .show()
+        Thread {
+            val result = runCatching {
+                val apk = Updater.download(this, rel) { pct ->
+                    if (pct >= 0) runOnUiThread { progress.setMessage("Downloading ${rel.version}… $pct%") }
+                }
+                runOnUiThread { progress.setMessage("Checked. Installing…") }
+                Updater.install(this, apk)
+            }
+            runOnUiThread {
+                progress.dismiss()
+                result.exceptionOrNull()?.let { Toast.makeText(this, "Update failed: ${it.message}", Toast.LENGTH_LONG).show() }
+            }
+        }.start()
+    }
+
     override fun onPause() {
         super.onPause()
         // Make sure the sign-in cookie is on disk for the background uploaders.
@@ -240,6 +325,7 @@ class MainActivity : Activity() {
             }
             R.id.stop_folder -> stopAutoUpload()
             R.id.reload -> web?.reload()
+            R.id.check_updates -> checkForUpdates(manual = true)
             R.id.change_address -> showSetup()
             else -> return super.onOptionsItemSelected(item)
         }

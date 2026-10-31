@@ -38,4 +38,7 @@ button.primary { background: var(--accent); border-color: var(--accent); color: 
 details summary { cursor: pointer; color: var(--muted); }
 details .field { margin-top: 8px; }
 .error { color: var(--danger); min-height: 1.2em; }
+.detect-status { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 10px; border-radius: 8px; background: var(--accent-soft); font-weight: 400; font-size: 13px; }
+.detect-status.warn { background: var(--surface); border: 1px solid var(--border); }
+.found { color: var(--accent); }
 .actions { display: flex; justify-content: flex-end; }

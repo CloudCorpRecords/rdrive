@@ -1,6 +1,7 @@
 // Desktop app settings, stored as JSON in Electron's per-user data folder.
 const fs = require('node:fs');
 const path = require('node:path');
+const { normalizeAddress } = require('./detect');
 
 const DEFAULTS = {
   // 'host' = run the drive on this computer; 'connect' = open a drive hosted elsewhere.
@@ -12,16 +13,19 @@ const DEFAULTS = {
   envFile: '', // optional .env with extra settings, e.g. the GitHub sign-in keys
   port: 8443,
   startAtLogin: true,
+  autoUpdate: true, // check GitHub for new versions and install them (desktop/updater.js)
 };
 
 class Settings {
   constructor(userDataDir) {
     this.file = path.join(userDataDir, 'settings.json');
     this.values = { ...DEFAULTS, dataDir: path.join(userDataDir, 'data') };
+    this.loadError = null;
     try {
-      Object.assign(this.values, JSON.parse(fs.readFileSync(this.file, 'utf8')));
-    } catch {
+      Object.assign(this.values, JSON.parse(fs.readFileSync(this.file, 'utf8').replace(/^﻿/, '')));
+    } catch (err) {
       // First run, or unreadable settings: start from defaults.
+      if (err.code !== 'ENOENT') this.loadError = err.message;
     }
   }
 
@@ -34,16 +38,14 @@ class Settings {
     const v = { ...this.values, ...next };
     if (!['host', 'connect'].includes(v.mode)) return 'Choose whether to host the drive here or connect to one.';
     if (v.serverUrl) {
-      let u;
-      try {
-        u = new URL(v.serverUrl);
-      } catch {
-        return 'The drive address is not a valid URL.';
-      }
+      // Pasted addresses may lack "https://" or carry a path; keep just the origin.
+      const origin = normalizeAddress(v.serverUrl);
+      if (!origin) return 'The drive address doesn\'t look right. It should be like https://my-computer.my-tailnet.ts.net';
+      const u = new URL(origin);
       if (u.protocol !== 'https:' && !['localhost', '127.0.0.1'].includes(u.hostname)) {
-        return 'The drive address must start with https:// so your password and files are encrypted.';
+        return 'The drive address must use https:// so your password and files are encrypted.';
       }
-      v.serverUrl = u.origin;
+      v.serverUrl = origin;
     } else if (v.mode === 'connect') {
       return 'Enter the address of your drive.';
     }

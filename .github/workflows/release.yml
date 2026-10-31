@@ -1,0 +1,127 @@
+name: Release
+
+# Push a tag like v0.5.0 (npm run release -- 0.5.0 does it) and this builds the Windows installer and the Mac
+# .dmg files, attaches them to the draft release next to the Android app (built and signed on the releaser's
+# computer by scripts/release.js), writes one SHA256SUMS.txt that every updater checks downloads against, and
+# publishes the release. Installed copies of rdrive then update themselves.
+#
+# Each release also carries copies under names that never change (rdrive-Windows-Setup.exe,
+# rdrive-Mac-AppleSilicon.dmg, rdrive-Mac-Intel.dmg, rdrive-Android.apk), so
+# .../releases/latest/download/<that name> is always the newest version. The updaters use the versioned names.
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  mac:
+    name: Mac .dmg (Apple silicon + Intel)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - name: The tag matches the version in package.json
+        run: test "v$(node -p "require('./package.json').version")" = "${GITHUB_REF_NAME}"
+      - run: npm ci --omit=dev
+      - run: npm ci
+        working-directory: desktop
+      - run: npm run dist:mac
+        working-directory: desktop
+      - name: Checksums
+        working-directory: desktop/dist
+        run: |
+          V="${GITHUB_REF_NAME#v}"
+          cp "rdrive-$V-arm64.dmg" rdrive-Mac-AppleSilicon.dmg
+          cp "rdrive-$V-x64.dmg" rdrive-Mac-Intel.dmg
+          shasum -a 256 "rdrive-$V-arm64.dmg" "rdrive-$V-x64.dmg" rdrive-Mac-AppleSilicon.dmg rdrive-Mac-Intel.dmg > sums-mac.txt
+          cat sums-mac.txt
+      - name: Attach to the draft release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${GITHUB_REF_NAME}"; V="${TAG#v}"
+          gh release view "$TAG" >/dev/null 2>&1 || gh release create "$TAG" --draft --title "rdrive $V" --notes "Building…"
+          gh release upload "$TAG" "desktop/dist/rdrive-$V-arm64.dmg" "desktop/dist/rdrive-$V-x64.dmg" desktop/dist/rdrive-Mac-AppleSilicon.dmg desktop/dist/rdrive-Mac-Intel.dmg --clobber
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sums-mac
+          path: desktop/dist/sums-mac.txt
+
+  windows:
+    name: Windows installer
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci --omit=dev
+      - run: npm ci
+        working-directory: desktop
+      - run: npm run dist:win
+        working-directory: desktop
+      - name: Checksums
+        shell: bash
+        working-directory: desktop/dist
+        run: |
+          V="${GITHUB_REF_NAME#v}"
+          cp "rdrive-$V-x64-setup.exe" rdrive-Windows-Setup.exe
+          sha256sum "rdrive-$V-x64-setup.exe" rdrive-Windows-Setup.exe | sed 's/ \*/  /' > sums-win.txt
+          cat sums-win.txt
+      - name: Attach to the draft release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${GITHUB_REF_NAME}"; V="${TAG#v}"
+          for i in 1 2 3 4 5 6 7 8 9; do gh release view "$TAG" >/dev/null 2>&1 && break; sleep 20; done
+          gh release view "$TAG" >/dev/null 2>&1 || gh release create "$TAG" --draft --title "rdrive $V" --notes "Building…"
+          gh release upload "$TAG" "desktop/dist/rdrive-$V-x64-setup.exe" desktop/dist/rdrive-Windows-Setup.exe --clobber
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sums-win
+          path: desktop/dist/sums-win.txt
+
+  publish:
+    name: SHA256SUMS.txt, notes, publish
+    needs: [mac, windows]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: sums-*
+          merge-multiple: true
+      - name: Android app (attached by scripts/release.js) and checksums
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${GITHUB_REF_NAME}"; V="${TAG#v}"
+          touch sums-android.txt
+          if gh release download "$TAG" --pattern "rdrive-$V.apk" --dir apk; then
+            cp "apk/rdrive-$V.apk" apk/rdrive-Android.apk
+            gh release upload "$TAG" apk/rdrive-Android.apk --clobber
+            (cd apk && sha256sum "rdrive-$V.apk" rdrive-Android.apk) > sums-android.txt
+          else
+            echo "::warning::This release has no Android app (released with --no-android?)."
+          fi
+          cat sums-mac.txt sums-win.txt sums-android.txt > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+          gh release upload "$TAG" SHA256SUMS.txt --clobber
+      - name: Publish (installed copies of rdrive update from here)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${GITHUB_REF_NAME}"; V="${TAG#v}"
+          BODY="$(gh release view "$TAG" --json body --jq .body)"
+          if [ "$BODY" = "Building…" ] || [ -z "$BODY" ]; then
+            node scripts/release.js --notes "$V" > notes.md
+            gh release edit "$TAG" --notes-file notes.md
+          fi
+          gh release edit "$TAG" --draft=false --latest
