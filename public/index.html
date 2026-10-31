@@ -7,6 +7,7 @@
   <link rel="icon" href="/icon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="/style.css">
   <script src="/interop.js" defer></script>
+  <script src="/vendor/sql_engine.js" defer></script>
   <script src="/sheet.js" defer></script>
   <script src="/docs.js" defer></script>
   <script src="/vendor/qrcode.js" defer></script>
@@ -104,6 +105,7 @@
       </div>
       <div class="topbar-right">
         <span id="usage" class="muted small"></span>
+        <button class="btn btn-ghost small" id="photos-btn" title="Photos &amp; media timeline">Photos</button>
         <button class="btn btn-ghost small" id="trash-btn" title="View deleted items">Trash</button>
         <button id="whoami" class="chip chip-btn" title="Account and devices"></button>
         <button class="btn btn-ghost" id="logout">Sign out</button>
@@ -147,10 +149,32 @@
       </div>
     </section>
 
+    <!-- Photos & Media Timeline -->
+    <section class="photos-view" id="photos-view" hidden>
+      <div class="photos-toolbar">
+        <div>
+          <strong id="photos-title">Photos &amp; Videos</strong>
+          <span class="muted small" id="photos-stats" style="margin-left: 8px;"></span>
+        </div>
+        <div class="photos-filters">
+          <button class="btn small active" id="photos-filter-all" type="button">All</button>
+          <button class="btn small" id="photos-filter-backups" type="button">Phone Backups</button>
+          <button class="btn small" id="photos-filter-videos" type="button">Videos</button>
+        </div>
+      </div>
+      <div class="photos-timeline" id="photos-timeline"></div>
+      <div id="photos-empty" class="empty" hidden>
+        <div class="empty-art" data-icon="image"></div>
+        <p><strong>No photos or videos yet.</strong></p>
+        <p class="muted">Upload photos or back up your phone camera to see your media timeline here.</p>
+      </div>
+    </section>
+
     <!-- Phones: the + button and the bottom bar (hidden on wider screens by style.css). -->
     <button class="fab" id="fab" type="button" aria-label="New" title="New"></button>
     <nav class="bottom-nav" id="bottom-nav" aria-label="Sections">
       <button type="button" data-nav="files" class="active"><span data-icon="folder"></span>Files</button>
+      <button type="button" data-nav="photos"><span data-icon="image"></span>Photos</button>
       <button type="button" data-nav="search"><span data-icon="search"></span>Search</button>
       <button type="button" data-nav="trash"><span data-icon="trash"></span>Trash</button>
       <button type="button" data-nav="you"><span data-icon="user"></span>You</button>
@@ -337,7 +361,8 @@
     <div class="sheet-formula-bar">
       <span id="sheet-cell-addr" class="sheet-addr mono">A1</span>
       <span class="sheet-fx mono">fx</span>
-      <input id="sheet-formula-input" type="text" placeholder="Enter value or formula (e.g. =SUM(A1:A10), =AVERAGE(B1:B5), =IF(A1>100, &quot;High&quot;, &quot;OK&quot;))" autocomplete="off" spellcheck="false">
+      <input id="sheet-formula-input" type="text" placeholder="Enter value or formula (e.g. =SUM(A1:A10), =SQL(...), =AI(...))" autocomplete="off" spellcheck="false">
+      <button id="sheet-ai-copilot-btn" class="sheet-btn-copilot" type="button" title="AI Formula Copilot (Ctrl+Shift+F)">✨ AI</button>
     </div>
     <div class="sheet-grid-wrap" id="sheet-grid-wrap">
       <table class="sheet-table" id="sheet-table"></table>
@@ -348,6 +373,27 @@
         <button class="btn small" id="sheet-add-tab" type="button" title="Add sheet tab">+</button>
       </div>
       <div id="sheet-stats" class="muted small mono">Ready</div>
+    </div>
+  </dialog>
+
+  <!-- RSheets: AI Formula Copilot -->
+  <dialog id="sheet-copilot-dialog" class="copilot-dialog">
+    <div class="copilot-header">
+      <span class="copilot-title">✨ AI Formula Copilot</span>
+      <button type="button" class="btn small btn-ghost" id="sheet-copilot-close">✕</button>
+    </div>
+    <div class="copilot-body">
+      <label class="small muted">Describe what you want to calculate:</label>
+      <input type="text" id="sheet-copilot-prompt" placeholder="e.g. sum column C where column B is 'paid' or average salary" class="copilot-input" autocomplete="off">
+      <div class="copilot-actions">
+        <button type="button" class="btn small btn-primary" id="sheet-copilot-generate">Generate formula</button>
+        <button type="button" class="btn small" id="sheet-copilot-explain">Explain formula</button>
+      </div>
+      <div id="sheet-copilot-result" class="copilot-result" hidden>
+        <div class="copilot-formula mono" id="sheet-copilot-formula"></div>
+        <div class="copilot-explanation small" id="sheet-copilot-explanation"></div>
+        <button type="button" class="btn small btn-primary" id="sheet-copilot-insert">Insert into active cell</button>
+      </div>
     </div>
   </dialog>
 
@@ -412,6 +458,8 @@
       <button class="btn small" id="doc-align-right" type="button" title="Align right">→≡</button>
       <span class="sheet-sep"></span>
       <button class="btn small" id="doc-table" type="button" title="Insert table">Table</button>
+      <button class="btn small" id="doc-slash-btn" type="button" title="Insert blocks (Table, Callout, Task list, Code)">/ Insert</button>
+      <button class="btn small" id="doc-history-btn" type="button" title="Version history &amp; visual diff">History</button>
       <button class="btn small" id="doc-image" type="button" title="Insert picture">Picture</button>
       <input type="file" id="doc-image-input" accept="image/png,image/jpeg,image/gif,image/webp" hidden>
       <button class="btn small" id="doc-hr" type="button" title="Horizontal line">―</button>
@@ -424,6 +472,50 @@
     <div class="sheet-bottom doc-chrome">
       <span id="doc-stats" class="muted small mono"></span>
       <span class="muted small">Ctrl+S save · Ctrl+K link · Ctrl+P print</span>
+    </div>
+  </dialog>
+
+  <!-- RDocs: Visual Version History & Diff -->
+  <dialog id="doc-history-dialog" class="copilot-dialog" style="max-width: 640px;">
+    <div class="copilot-header">
+      <span class="copilot-title">⏱️ Document History &amp; Visual Diff</span>
+      <button type="button" class="btn small btn-ghost" id="doc-history-close">✕</button>
+    </div>
+    <div class="copilot-body">
+      <label class="small muted">Saved snapshots:</label>
+      <select id="doc-history-select" class="select-input"></select>
+      <div id="doc-diff-view" class="doc-diff-view"></div>
+      <div class="copilot-actions">
+        <button type="button" class="btn small btn-primary" id="doc-history-restore">Restore this version</button>
+      </div>
+    </div>
+  </dialog>
+
+  <!-- Photos: Google Photos-Style Lightbox -->
+  <dialog id="photos-lightbox" class="photos-lightbox">
+    <div class="lightbox-topbar">
+      <button class="btn small btn-ghost" id="lightbox-close" type="button">✕ Close</button>
+      <div class="lightbox-info" id="lightbox-info"></div>
+      <div class="lightbox-actions">
+        <a class="btn small btn-primary" id="lightbox-download" download>Download</a>
+      </div>
+    </div>
+    <div class="lightbox-stage">
+      <button class="lightbox-nav prev" id="lightbox-prev" type="button" aria-label="Previous photo">‹</button>
+      <div class="lightbox-content" id="lightbox-content"></div>
+      <button class="lightbox-nav next" id="lightbox-next" type="button" aria-label="Next photo">›</button>
+    </div>
+  </dialog>
+
+  <!-- Automations & Pipelines Dialog -->
+  <dialog id="watchers-dialog" class="copilot-dialog" style="max-width: 580px;">
+    <div class="copilot-header">
+      <span class="copilot-title">⚡ Automations &amp; Pipelines</span>
+      <button type="button" class="btn small btn-ghost" id="watchers-close">✕</button>
+    </div>
+    <div class="copilot-body">
+      <p class="small muted">Event-driven workflows that trigger when files are backed up or uploaded.</p>
+      <div class="watchers-list" id="watchers-list"></div>
     </div>
   </dialog>
 
@@ -471,6 +563,18 @@
           <button class="phone-action" type="button" data-phone="changeAddress">
             <span data-icon="edit"></span>
             <span><strong>Change drive address</strong></span>
+          </button>
+        </div>
+      </section>
+      <section id="automations-section">
+        <h3>Automations</h3>
+        <div class="phone-actions">
+          <button class="phone-action" type="button" id="open-watchers-btn">
+            <span data-icon="settings"></span>
+            <span>
+              <strong>Automations &amp; Pipelines</strong>
+              <span class="muted small" id="watchers-summary">Smart OCR, Auto-Expenses &amp; Backups</span>
+            </span>
           </button>
         </div>
       </section>

@@ -376,6 +376,8 @@ function showDrive() {
 
 async function load() {
   state.selected.clear();
+  $('#photos-view').hidden = true;
+  $('#listing').hidden = false;
   setNav(state.view === 'trash' ? 'trash' : state.view === 'search' ? 'search' : 'files');
   $('#drive-actions').hidden = state.view === 'trash';
   $('#trash-actions').hidden = state.view !== 'trash';
@@ -615,7 +617,13 @@ function renderSearch() {
     const loc = document.createElement('span');
     loc.className = 'muted small';
     loc.textContent = entry.dir === '/' ? '' : `in ${entry.dir}`;
-    name.append(nameBlock(link, `${metaLine(entry)} · ${entry.dir === '/' ? 'My Drive' : `in ${entry.dir}`}`), loc);
+    let metaText = `${metaLine(entry)} · ${entry.dir === '/' ? 'My Drive' : `in ${entry.dir}`}`;
+    if (entry.matchType === 'ocr') {
+      metaText = `📸 ${entry.snippet} · ${metaText}`;
+    } else if (entry.matchType === 'document') {
+      metaText = `📄 "${entry.snippet}" · ${metaText}`;
+    }
+    name.append(nameBlock(link, metaText), loc);
 
     const size = document.createElement('span');
     size.className = 'cell-size';
@@ -1368,7 +1376,7 @@ $('#camera-input').addEventListener('change', (e) => {
 
 function setNav(which) {
   for (const b of document.querySelectorAll('#bottom-nav [data-nav]')) b.classList.toggle('active', b.dataset.nav === which);
-  $('#fab').hidden = which === 'trash';
+  $('#fab').hidden = which === 'trash' || which === 'photos';
 }
 
 $('#bottom-nav').addEventListener('click', (e) => {
@@ -1382,6 +1390,10 @@ $('#bottom-nav').addEventListener('click', (e) => {
     setNav('files');
     if (location.hash === '#/' || !location.hash) load();
     else navigate('/');
+  } else if (nav === 'photos') {
+    $('#search-input').value = '';
+    state.searchQuery = '';
+    loadPhotos('all');
   } else if (nav === 'search') {
     setNav('search');
     window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -1396,6 +1408,170 @@ $('#bottom-nav').addEventListener('click', (e) => {
     openAccount();
   }
 });
+
+$('#photos-btn').addEventListener('click', () => {
+  $('#search-input').value = '';
+  state.searchQuery = '';
+  loadPhotos('all');
+});
+
+let currentPhotoItems = [];
+let currentPhotoIndex = 0;
+
+async function loadPhotos(filter = 'all') {
+  state.view = 'photos';
+  setNav('photos');
+  $('#listing').hidden = true;
+  $('#photos-view').hidden = false;
+  $('#drive-actions').hidden = true;
+  $('#trash-actions').hidden = true;
+  $('#crumbs').innerHTML = '<span><a href="#/">My Drive</a></span><span class="crumb-sep">/</span><span>Photos &amp; Media</span>';
+
+  for (const btn of document.querySelectorAll('.photos-filters .btn')) {
+    btn.classList.toggle('active', btn.id === `photos-filter-${filter}`);
+  }
+
+  $('#photos-stats').textContent = 'Loading timeline...';
+  try {
+    const data = await api('GET', `/api/photos/timeline?filter=${encodeURIComponent(filter)}`);
+    const timeline = $('#photos-timeline');
+    timeline.replaceChildren();
+
+    const groups = data.groups || [];
+    currentPhotoItems = [];
+
+    $('#photos-empty').hidden = groups.length > 0;
+    $('#photos-stats').textContent = `${data.stats.totalMedia} items (${data.stats.photosCount} photos, ${data.stats.videosCount} videos)`;
+
+    for (const group of groups) {
+      const gEl = document.createElement('div');
+      gEl.className = 'photos-group';
+
+      const title = document.createElement('div');
+      title.className = 'photos-group-title';
+      title.textContent = `${group.title} · ${group.items.length}`;
+      gEl.appendChild(title);
+
+      const grid = document.createElement('div');
+      grid.className = 'photos-grid';
+
+      for (const item of group.items) {
+        const itemIdx = currentPhotoItems.length;
+        currentPhotoItems.push(item);
+
+        const card = document.createElement('div');
+        card.className = 'photo-card';
+
+        const img = document.createElement('img');
+        img.className = 'photo-thumb';
+        img.loading = 'lazy';
+        img.alt = item.name;
+        img.src = `/api/download?path=${encodeURIComponent(item.path)}&inline=1`;
+
+        card.appendChild(img);
+
+        if (item.isVideo) {
+          const vBadge = document.createElement('span');
+          vBadge.className = 'video-badge';
+          vBadge.textContent = '▶ Video';
+          card.appendChild(vBadge);
+        }
+
+        if (item.device) {
+          const dBadge = document.createElement('span');
+          dBadge.className = 'device-badge';
+          dBadge.textContent = item.device;
+          card.appendChild(dBadge);
+        }
+
+        card.addEventListener('click', () => openLightbox(itemIdx));
+        grid.appendChild(card);
+      }
+      gEl.appendChild(grid);
+      timeline.appendChild(gEl);
+    }
+  } catch (err) {
+    toast(err.message || 'Could not load media timeline.');
+  }
+}
+
+function openLightbox(idx) {
+  if (idx < 0 || idx >= currentPhotoItems.length) return;
+  currentPhotoIndex = idx;
+  const item = currentPhotoItems[idx];
+  const dlg = $('#photos-lightbox');
+  const stage = $('#lightbox-content');
+  const info = $('#lightbox-info');
+  const dl = $('#lightbox-download');
+
+  stage.replaceChildren();
+  info.innerHTML = `<strong>${escapeHtml(item.name)}</strong> · ${formatSize(item.size)}${item.device ? ` · <em>${escapeHtml(item.device)}</em>` : ''}`;
+  const fileUrl = `/api/download?path=${encodeURIComponent(item.path)}&inline=1`;
+  dl.href = fileUrl;
+
+  if (item.isVideo) {
+    const video = document.createElement('video');
+    video.src = fileUrl;
+    video.controls = true;
+    video.autoplay = true;
+    stage.appendChild(video);
+  } else {
+    const img = document.createElement('img');
+    img.src = fileUrl;
+    stage.appendChild(img);
+  }
+
+  dlg.showModal();
+}
+
+$('#lightbox-close').addEventListener('click', () => $('#photos-lightbox').close());
+$('#lightbox-prev').addEventListener('click', () => openLightbox(currentPhotoIndex - 1));
+$('#lightbox-next').addEventListener('click', () => openLightbox(currentPhotoIndex + 1));
+document.addEventListener('keydown', (e) => {
+  if ($('#photos-lightbox').open) {
+    if (e.key === 'ArrowLeft') openLightbox(currentPhotoIndex - 1);
+    if (e.key === 'ArrowRight') openLightbox(currentPhotoIndex + 1);
+  }
+});
+
+$('#photos-filter-all').addEventListener('click', () => loadPhotos('all'));
+$('#photos-filter-backups').addEventListener('click', () => loadPhotos('backups'));
+$('#photos-filter-videos').addEventListener('click', () => loadPhotos('videos'));
+
+$('#open-watchers-btn').addEventListener('click', async () => {
+  const dlg = $('#watchers-dialog');
+  const list = $('#watchers-list');
+  list.innerHTML = '<div class="muted small">Loading pipelines...</div>';
+  dlg.showModal();
+  try {
+    const data = await api('GET', '/api/watchers');
+    list.replaceChildren();
+    for (const w of data.watchers || []) {
+      const card = document.createElement('div');
+      card.className = 'watcher-card';
+      card.innerHTML = `
+        <div class="watcher-info">
+          <strong>${escapeHtml(w.name)}</strong>
+          <span class="muted small">${escapeHtml(w.description || '')} (${escapeHtml(w.pattern)})</span>
+        </div>
+        <button class="btn small ${w.enabled ? 'btn-primary' : 'btn-ghost'}" type="button">${w.enabled ? 'Enabled' : 'Disabled'}</button>
+      `;
+      const btn = card.querySelector('button');
+      btn.onclick = async () => {
+        btn.disabled = true;
+        await api('POST', '/api/watchers', { toggleId: w.id });
+        w.enabled = !w.enabled;
+        btn.textContent = w.enabled ? 'Enabled' : 'Disabled';
+        btn.className = `btn small ${w.enabled ? 'btn-primary' : 'btn-ghost'}`;
+        btn.disabled = false;
+      };
+      list.appendChild(card);
+    }
+  } catch (err) {
+    toast(err.message || 'Could not load automations.');
+  }
+});
+$('#watchers-close').addEventListener('click', () => $('#watchers-dialog').close());
 
 hydrateIcons();
 document.addEventListener('keydown', (e) => {

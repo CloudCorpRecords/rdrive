@@ -26,6 +26,10 @@ const { handleWebdav } = require('./lib/webdav');
 const { McpServer, generateLlmsTxt } = require('./lib/mcp');
 const { DevicePairing } = require('./lib/pair');
 const { rdocToMarkdown, isRdocName } = require('./lib/rdoc');
+const ai = require('./lib/ai_service');
+const { getPhotosTimeline } = require('./lib/photos');
+const { OCRStore, smartSearch } = require('./lib/smart_search');
+const { WatcherManager } = require('./lib/watchers');
 
 const DATA_DIR = path.resolve(process.env.RDRIVE_DATA || path.join(__dirname, 'data'));
 const PORT = Number(process.env.PORT || 8443);
@@ -201,9 +205,11 @@ function defaultSheetPayload(title = 'Sheet 1') {
 }
 
 // options: { auth, files, github?, sync?, shares?, pairing?, secureCookies?, trustProxy? }
-function createHandler({ auth, files, github = null, sync = null, shares = null, pairing = null, secureCookies = USE_HTTPS, trustProxy = TRUST_PROXY }) {
+function createHandler({ auth, files, github = null, sync = null, shares = null, pairing = null, ocrStore = null, watchers = null, secureCookies = USE_HTTPS, trustProxy = TRUST_PROXY }) {
   if (!shares && files && files.filesDir) shares = new Shares(path.dirname(files.filesDir));
   if (!pairing) pairing = new DevicePairing();
+  if (!ocrStore && files && files.filesDir) ocrStore = new OCRStore(path.dirname(files.filesDir));
+  if (!watchers && files && files.filesDir) watchers = new WatcherManager(path.dirname(files.filesDir), ocrStore);
   const mcp = new McpServer({ auth, files, shares, onChanged: () => sync && sync.localChanged() });
   const secure = secureCookies ? '; Secure' : '';
   const sessionCookie = (token, maxAgeSec) => `${COOKIE}=${token}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${maxAgeSec}${secure}`;
@@ -237,7 +243,9 @@ function createHandler({ auth, files, github = null, sync = null, shares = null,
     const q = url.searchParams;
     const ip = clientIp(req);
     const cookies = parseCookies(req.headers.cookie);
-    const token = cookies[COOKIE];
+    const authHeader = String(req.headers.authorization || '');
+    const bearerMatch = /^Bearer\s+(\S+)$/i.exec(authHeader);
+    const token = cookies[COOKIE] || (bearerMatch ? bearerMatch[1] : null);
     const meta = { ip, userAgent: req.headers['user-agent'] };
     const changed = () => sync && sync.localChanged();
 
@@ -607,7 +615,29 @@ function createHandler({ auth, files, github = null, sync = null, shares = null,
         return sendJson(res, 200, { path: q.get('path') || '/', entries: await files.list(user, q.get('path')) });
       }
       if (route === '/api/search' && req.method === 'GET') {
-        return sendJson(res, 200, { results: await files.search(user, q.get('q')) });
+        return sendJson(res, 200, { results: await smartSearch(files, ocrStore, user, q.get('q')) });
+      }
+      if (route === '/api/photos/timeline' && req.method === 'GET') {
+        const filter = q.get('filter') || 'all';
+        const limit = Number(q.get('limit') || 200);
+        const offset = Number(q.get('offset') || 0);
+        const data = await getPhotosTimeline(files, user, { filter, limit, offset });
+        return sendJson(res, 200, data);
+      }
+      if (route === '/api/watchers' && req.method === 'GET') {
+        return sendJson(res, 200, { watchers: watchers.getWatchers(user) });
+      }
+      if (route === '/api/watchers' && req.method === 'POST') {
+        const { watcher, toggleId } = await readJsonBody(req);
+        const list = watchers.getWatchers(user);
+        if (toggleId) {
+          const item = list.find((w) => w.id === toggleId);
+          if (item) item.enabled = !item.enabled;
+        } else if (watcher) {
+          list.push(watcher);
+        }
+        watchers.saveWatchers(user, list);
+        return sendJson(res, 200, { ok: true, watchers: list });
       }
       if (route === '/api/download' && (req.method === 'GET' || req.method === 'HEAD')) {
         const file = await files.fileForDownload(user, q.get('path'));
@@ -630,7 +660,22 @@ function createHandler({ auth, files, github = null, sync = null, shares = null,
       if (route === '/api/upload' && req.method === 'PUT') {
         const name = await files.upload(user, q.get('path'), q.get('name'), req, { overwrite: q.get('overwrite') === '1' });
         changed();
+        const clientPath = (q.get('path') === '/' ? '' : q.get('path')) + '/' + name;
+        watchers.onUpload(files, user, clientPath, name).catch(() => {});
         return sendJson(res, 200, { name });
+      }
+      if (route === '/api/ai/cell' && req.method === 'POST') {
+        const body = await readJsonBody(req);
+        const result = await ai.evalAICell(body);
+        return sendJson(res, 200, { result });
+      }
+      if (route === '/api/ai/formula-copilot' && req.method === 'POST') {
+        const { prompt, formula, action = 'generate', cols } = await readJsonBody(req);
+        if (action === 'explain') {
+          return sendJson(res, 200, { explanation: ai.explainFormula(formula) });
+        }
+        const generated = ai.generateFormula(prompt, cols);
+        return sendJson(res, 200, generated);
       }
       if (route === '/api/sheet/create' && req.method === 'POST') {
         const { path: dirPath = '/', name = 'Untitled spreadsheet.rsheet', format = 'rsheet' } = await readJsonBody(req);
