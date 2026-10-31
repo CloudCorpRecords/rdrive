@@ -240,6 +240,12 @@
       codes.push(c);
       return `\u0000${codes.length - 1}\u0000`;
     });
+    // Backslash escapes (\* \_ \| \\ …) become literal characters.
+    const literals = [];
+    s = s.replace(/\\([\\`*_{}[\]()#+\-.!|~>])/g, (_, ch) => {
+      literals.push(ch);
+      return `\u0001${literals.length - 1}\u0001`;
+    });
     s = escapeHtml(s);
     s = s.replace(/!\[([^\]]*)\]\(([^)\s]+)\)/g, (_, alt, src) => `<img alt="${alt}" src="${src}">`);
     s = s.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (_, t, href) => `<a href="${href}">${t}</a>`);
@@ -247,7 +253,26 @@
     s = s.replace(/(^|[^*\w])\*([^*\s][^*]*)\*/g, '$1<em>$2</em>').replace(/(^|[^_\w])_([^_\s][^_]*)_/g, '$1<em>$2</em>');
     s = s.replace(/~~([^~]+)~~/g, '<s>$1</s>');
     s = s.replace(/ {2,}$/g, '<br>');
+    s = s.replace(/\u0001(\d+)\u0001/g, (_, i) => escapeHtml(literals[Number(i)]));
     return s.replace(/\u0000(\d+)\u0000/g, (_, i) => `<code>${escapeHtml(codes[Number(i)])}</code>`);
+  }
+
+  // Splits "| a | b\|c |" into cells on unescaped pipes, keeping escapes for inlineMarkdown.
+  function splitTableRow(line) {
+    const body = line.trim().replace(/^\|/, '');
+    const cells = [];
+    let cur = '';
+    for (let i = 0; i < body.length; i++) {
+      if (body[i] === '\\' && i + 1 < body.length) {
+        cur += body[i] + body[i + 1];
+        i++;
+      } else if (body[i] === '|') {
+        cells.push(cur);
+        cur = '';
+      } else cur += body[i];
+    }
+    if (cur.trim()) cells.push(cur);
+    return cells.map((c) => inlineMarkdown(c.trim()));
   }
 
   function markdownToHtml(md) {
@@ -287,7 +312,7 @@
         continue;
       }
       if (/^\|.*\|\s*$/.test(line) && i + 1 < lines.length && /^\|?\s*:?-{2,}/.test(lines[i + 1])) {
-        const cells = (l) => l.trim().replace(/^\|/, '').replace(/\|$/, '').split('|').map((c) => inlineMarkdown(c.trim()));
+        const cells = splitTableRow;
         const head = cells(line);
         i += 2;
         const rows = [];
@@ -354,7 +379,8 @@
 
   function htmlToMarkdown(html, DOMParserImpl) {
     const doc = parseHtml(html, DOMParserImpl);
-    const esc = (t) => t.replace(/([\\`*_[\]])/g, '\\$1');
+    // Backslash first-class: every Markdown meta-character (including "|" for tables) is escaped in one pass.
+    const esc = (t) => t.replace(/([\\`*_[\]|])/g, '\\$1');
 
     function inline(node) {
       let s = '';
@@ -408,7 +434,8 @@
         else if (tag === 'pre') parts.push('```\n' + n.textContent.replace(/\n$/, '') + '\n```');
         else if (tag === 'hr') parts.push('---');
         else if (tag === 'table') {
-          const rows = Array.from(n.querySelectorAll('tr')).map((tr) => Array.from(tr.children).map((c) => inline(c).trim().replace(/\|/g, '\\|')));
+          // Cell text is already escaped by inline() (which escapes "|"), so it's safe inside "| … |".
+          const rows = Array.from(n.querySelectorAll('tr')).map((tr) => Array.from(tr.children).map((c) => inline(c).trim()));
           if (rows.length) {
             const width = Math.max(...rows.map((r) => r.length));
             const pad = (r) => r.concat(Array(width - r.length).fill(''));

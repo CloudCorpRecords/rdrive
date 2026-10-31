@@ -63,7 +63,11 @@ test('Markdown round trip', () => {
   for (const piece of ['# Title', '**bold**', '*italic*', '`code`', '[a link](https://example.com)', '- one', '   - nested', '1. first', '> quoted', '| A | B |', '```\nconst x = 1;\n```']) {
     assert.ok(back.includes(piece), `missing ${JSON.stringify(piece)} in:\n${back}`);
   }
-  assert.doesNotMatch(interop.markdownToHtml('<script>x</script>'), /<script>/);
+  assert.doesNotMatch(interop.markdownToHtml('<script>x</script><SCRIPT>y</SCRIPT>'), /<script/i);
+  // Pipes and backslashes in table cells survive the trip.
+  const tricky = interop.htmlToMarkdown('<table><tr><th>a|b</th><th>c\\d</th></tr><tr><td>1</td><td>2</td></tr></table>', DOMParser);
+  assert.match(tricky, /\| a\\\|b \| c\\\\d \|/);
+  assert.match(interop.markdownToHtml(tricky), /<th>a\|b<\/th><th>c\\d<\/th>/);
 });
 
 test('Word (.docx) round trip', async () => {
