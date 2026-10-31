@@ -252,15 +252,14 @@ class MainActivity : Activity() {
         }
         w.addJavascriptInterface(PhoneBridge(host), "RDriveApp")
         w.setBackgroundColor(getColor(R.color.page_bg)) // no white flash before the page paints
-        // WebView ignores its own padding, so the status-bar spacing goes on a container around it.
-        // The drive page manages bottom-bar spacing with CSS env(safe-area-inset-bottom), so we
-        // don't pad the bottom here—otherwise the nav space is reserved twice.
+        // Status-bar spacing and system navigation bar spacing go on the container around the WebView,
+        // so the drive UI, bottom nav, and keyboard never get covered by system bars.
         val frame = android.widget.FrameLayout(this).apply {
             setBackgroundColor(getColor(R.color.page_bg))
             addView(w, ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
         }
         setContentView(frame)
-        applyInsets(frame, padBottom = false)
+        applyInsets(frame, padBottom = true)
         val startUrl = pendingPairUrl ?: url
         pendingPairUrl = null
         if (state == null || w.restoreState(state) == null) w.loadUrl(startUrl)
@@ -285,15 +284,20 @@ class MainActivity : Activity() {
             val bars = insets.getInsets(android.view.WindowInsets.Type.systemBars() or android.view.WindowInsets.Type.ime())
             // Without bottom padding the keyboard still needs room, or it would cover what you type.
             val ime = insets.getInsets(android.view.WindowInsets.Type.ime()).bottom
-            view.setPadding(bars.left, bars.top, bars.right, if (padBottom) bars.bottom else ime)
+            val bottomPad = if (padBottom) maxOf(bars.bottom, ime) else ime
+            view.setPadding(bars.left, bars.top, bars.right, bottomPad)
             insets
         }
         (v.parent as? ViewGroup)?.requestApplyInsets()
     }
 
     private fun goBack() {
-        val w = web
-        if (w != null && w.canGoBack()) w.goBack() else finish()
+        val w = web ?: return finish()
+        // If an in-app dialog/sheet is open, Back dismisses it first.
+        w.evaluateJavascript("(function(){var d=document.querySelector('dialog[open]');if(d){d.close();return 'closed';}return '';})()") { res ->
+            if (res != null && res.contains("closed")) return@evaluateJavascript
+            if (w.canGoBack()) w.goBack() else finish()
+        }
     }
 
     @Deprecated("Used below Android 13; newer versions use OnBackInvokedCallback.")

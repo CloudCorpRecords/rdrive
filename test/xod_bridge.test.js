@@ -5,7 +5,7 @@ const path = require('node:path');
 const os = require('node:os');
 const { Files } = require('../lib/files');
 const { VaultManager } = require('../lib/vault');
-const { XodBridge, RDRIVE_TOOLS } = require('../lib/xod_bridge');
+const { XodBridge, RDRIVE_TOOLS, extractTextToolCalls } = require('../lib/xod_bridge');
 
 test('xod bridge: tool definitions, execution of drive/doc/code/storage tools', async () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'rdrive-xod-test-'));
@@ -58,6 +58,25 @@ test('xod bridge: tool definitions, execution of drive/doc/code/storage tools', 
     // 6. getStatus() returns connected flag & tool list
     const status = await bridge.getStatus();
     assert.ok(status.tools.length >= 8);
+
+    // 7. extractTextToolCalls fallback tests
+    const samplePhoneOutput = '范冰\n{"name": "sheet_create", "arguments": {"path": "/Budget.rsheet", "rows": [["Month", "Income", "Expenses", "Savings"], ["January", 3000, 1500, 1500]]}}\n</tool_call>';
+    const calls1 = extractTextToolCalls(samplePhoneOutput);
+    assert.equal(calls1.length, 1);
+    assert.equal(calls1[0].function.name, 'sheet_create');
+    const parsedArgs1 = JSON.parse(calls1[0].function.arguments);
+    assert.equal(parsedArgs1.path, '/Budget.rsheet');
+    assert.equal(parsedArgs1.rows.length, 2);
+
+    const standardTag = '<tool_call>\n{"name": "drive_trash", "arguments": {"path": "/old.txt"}}\n</tool_call>';
+    const calls2 = extractTextToolCalls(standardTag);
+    assert.equal(calls2.length, 1);
+    assert.equal(calls2[0].function.name, 'drive_trash');
+
+    const codeBlock = '```json\n{"name": "storage_analytics", "arguments": {}}\n```';
+    const calls3 = extractTextToolCalls(codeBlock);
+    assert.equal(calls3.length, 1);
+    assert.equal(calls3[0].function.name, 'storage_analytics');
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }

@@ -3371,7 +3371,8 @@ async function updateXodStatus() {
       for (const m of (xodStatus.models || [])) {
         const opt = document.createElement('option');
         opt.value = m.id;
-        opt.textContent = m.name || m.id;
+        const short = (m.id || '').replace(/^xod\//, '').replace(/:ctx\d+k?/, '').replace(/:\w+$/, '');
+        opt.textContent = short || m.name || m.id;
         if (m.id === xodStatus.activeModel) opt.selected = true;
         modelSelect.appendChild(opt);
       }

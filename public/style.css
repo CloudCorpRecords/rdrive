@@ -592,14 +592,15 @@ input:not([type="checkbox"]):focus-visible { outline: 2px solid var(--accent); o
 @media (max-width: 700px) {
   body { font-size: 15px; }
   #drive-view { padding-bottom: calc(76px + env(safe-area-inset-bottom)); }
-  /* Header: just the search pill and your avatar. Usage, trash and sign out live under "You". */
-  .topbar { padding: 10px 16px 6px; gap: 10px; }
-  #drive-view .topbar .brand { font-size: 0; gap: 0; }
-  #drive-view .topbar .brand img { width: 30px; height: 30px; }
-  .search-box { margin: 0; max-width: none; }
-  .search-box input { height: 42px; padding: 0 16px; }
-  #usage, #trash-btn, #logout { display: none; }
-  #whoami { width: 38px; height: 38px; padding: 0; border-radius: 999px; font-size: 15px; font-weight: 650; text-transform: uppercase; display: grid; place-items: center; overflow: hidden; }
+  /* Header: clean brand icon, full-width search input, and avatar. Desktop nav buttons hidden. */
+  .topbar { padding: 8px 12px; gap: 8px; display: flex; align-items: center; }
+  #drive-view .topbar .brand { font-size: 0; gap: 0; flex-shrink: 0; }
+  #drive-view .topbar .brand img { width: 32px; height: 32px; display: block; }
+  .search-box { margin: 0; max-width: none; flex: 1 1 0; min-width: 0; width: auto; }
+  .search-box input { height: 40px; width: 100%; padding: 0 14px; box-sizing: border-box; }
+  #usage, #trash-btn, #logout, #photos-btn, #starred-btn, #vault-btn, #xod-btn { display: none !important; }
+  .topbar-right { flex-shrink: 0; display: flex; align-items: center; gap: 6px; }
+  #whoami { width: 36px; height: 36px; min-width: 36px; padding: 0; border-radius: 999px; font-size: 14px; font-weight: 650; text-transform: uppercase; display: grid; place-items: center; overflow: hidden; flex-shrink: 0; }
   #whoami .full { display: none; }
   #whoami .initial { display: inline; }
 
@@ -645,11 +646,47 @@ input:not([type="checkbox"]):focus-visible { outline: 2px solid var(--accent); o
   .fab .icon { width: 28px; height: 28px; }
   .fab:active { transform: scale(0.96); }
 
-  /* Bottom bar: Files, Search, Trash, You. */
-  .bottom-nav { display: flex; position: fixed; left: 12px; right: 12px; bottom: calc(10px + env(safe-area-inset-bottom)); z-index: 14; height: 60px; padding: 6px; border-radius: 999px; background: color-mix(in srgb, var(--surface-2) 92%, transparent); backdrop-filter: blur(14px); box-shadow: var(--shadow); justify-content: space-around; }
-  .bottom-nav button { flex: 1; border: 0; background: none; border-radius: 999px; color: var(--muted); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; font-size: 11px; font-weight: 500; cursor: pointer; }
-  .bottom-nav button .icon { width: 22px; height: 22px; }
-  .bottom-nav button.active { color: var(--accent); background: var(--accent-soft); }
+  /* Bottom bar: Files, Photos, Starred, Xod, Search, You. */
+  .bottom-nav {
+    display: flex;
+    position: fixed;
+    left: 10px;
+    right: 10px;
+    bottom: calc(10px + env(safe-area-inset-bottom, 0px));
+    z-index: 14;
+    height: 58px;
+    padding: 4px 6px;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--surface-2) 94%, transparent);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+    justify-content: space-around;
+    box-sizing: border-box;
+  }
+  .bottom-nav button {
+    flex: 1 1 0;
+    min-width: 0;
+    border: 0;
+    background: none;
+    border-radius: 12px;
+    color: var(--muted);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+    font-size: 10px;
+    font-weight: 500;
+    padding: 3px 2px;
+    cursor: pointer;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    box-sizing: border-box;
+  }
+  .bottom-nav button .icon { width: 20px; height: 20px; flex-shrink: 0; }
+  .bottom-nav button.active { color: var(--accent); font-weight: 600; background: var(--accent-soft); }
   #public-share-view .bottom-nav, #public-share-view .fab { display: none; }
 
   /* Menus become bottom sheets with big targets. */
@@ -665,11 +702,37 @@ input:not([type="checkbox"]):focus-visible { outline: 2px solid var(--accent); o
   /* Uploads: a slim card above the bottom bar instead of a panel over the list. */
   .uploads { left: 12px; right: 12px; width: auto; bottom: calc(80px + env(safe-area-inset-bottom)); max-height: 40vh; border-radius: 20px; }
 
-  /* Dialogs slide up from the bottom like sheets. */
-  dialog:not(.sheet-modal):not(.preview) { width: 100%; max-width: 100%; margin: auto 0 0; border-radius: 26px 26px 0 0; padding-bottom: env(safe-area-inset-bottom); }
+  /* Dialogs slide up from the bottom like sheets, except full-screen editors/agents. */
+  dialog:not(.sheet-modal):not(.preview):not(.xod-dialog):not(.code-editor-dialog) {
+    width: 100%;
+    max-width: 100%;
+    margin: auto 0 0;
+    border-radius: 26px 26px 0 0;
+    padding-bottom: max(16px, env(safe-area-inset-bottom, 16px));
+    box-sizing: border-box;
+  }
   .dialog-actions .btn { height: 44px; flex: 1; justify-content: center; }
   dialog.account { max-height: 92vh; }
-  dialog.sheet-modal { width: 100vw; height: 100vh; max-height: 100vh; border-radius: 0; }
+  dialog.sheet-modal,
+  dialog.xod-dialog,
+  dialog.code-editor-dialog,
+  dialog.preview {
+    position: fixed !important;
+    inset: 0 !important;
+    top: 0 !important;
+    left: 0 !important;
+    right: 0 !important;
+    bottom: 0 !important;
+    width: 100vw !important;
+    max-width: 100vw !important;
+    height: 100% !important;
+    height: 100dvh !important;
+    max-height: 100dvh !important;
+    margin: 0 !important;
+    border: 0 !important;
+    border-radius: 0 !important;
+    box-sizing: border-box !important;
+  }
   .toast { bottom: calc(84px + env(safe-area-inset-bottom)); }
 }
 
@@ -1506,42 +1569,142 @@ input:not([type="checkbox"]):focus-visible { outline: 2px solid var(--accent); o
 @media (max-width: 768px) {
   dialog.xod-dialog[open] {
     padding: 0;
-    position: fixed;
-    inset: 0;
-    width: auto;
-    max-width: none;
-    box-sizing: border-box;
-    height: 100dvh;
-    max-height: 100dvh;
-    margin: 0;
-    border: 0;
-    border-radius: 0;
-    z-index: 100;
+    position: fixed !important;
+    inset: 0 !important;
+    top: 0 !important;
+    left: 0 !important;
+    right: 0 !important;
+    bottom: 0 !important;
+    width: 100vw !important;
+    max-width: 100vw !important;
+    box-sizing: border-box !important;
+    height: 100% !important;
+    height: 100dvh !important;
+    max-height: 100dvh !important;
+    margin: 0 !important;
+    border: 0 !important;
+    border-radius: 0 !important;
+    z-index: 1000 !important;
+    display: flex !important;
+    flex-direction: column !important;
   }
-  .xod-head { padding: calc(env(safe-area-inset-top, 0px) + 10px) 12px 10px; gap: 8px; }
-  .xod-title-wrap { min-width: 0; flex: 1; }
+  .xod-head {
+    padding: calc(env(safe-area-inset-top, 0px) + 8px) 12px 8px;
+    gap: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-shrink: 0;
+    box-sizing: border-box;
+    width: 100%;
+  }
+  .xod-title-wrap { min-width: 0; flex: 1 1 auto; overflow: hidden; }
   .xod-title-wrap > div { min-width: 0; }
   .xod-status-line { flex-wrap: wrap; }
-  #xod-active-model { max-width: 40vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .xod-head-actions { flex-shrink: 0; }
-  #xod-model-select { max-width: 120px; font-size: 12px; }
-  .xod-quick-chips { flex-shrink: 0; -webkit-overflow-scrolling: touch; scrollbar-width: none; }
-  .xod-quick-chips::-webkit-scrollbar { display: none; }
-  .xod-body { min-height: 0; overscroll-behavior: contain; }
-  .xod-msg { max-width: 94%; }
-  .xod-bubble { overflow-wrap: anywhere; white-space: pre-wrap; }
-  .xod-input-bar { flex-shrink: 0; padding: 10px 12px calc(env(safe-area-inset-bottom, 0px) + 10px); }
-  .xod-input-bar input { min-width: 0; width: 0; flex: 1 1 0; font-size: 16px; }
   #xod-active-model { display: none; }
-  .xod-input-bar { box-sizing: border-box; width: 100%; }
-  .xod-input-bar .btn { flex: 0 0 auto; }
+  .xod-head-actions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-shrink: 0;
+  }
+  #xod-model-select {
+    max-width: 130px;
+    width: auto;
+    font-size: 12px;
+    height: 34px;
+    padding: 0 20px 0 8px;
+    border-radius: 8px;
+    background: var(--surface-2);
+    color: var(--text);
+    border: 1px solid var(--border);
+    box-sizing: border-box;
+    text-overflow: ellipsis;
+  }
+  #xod-close {
+    width: 40px;
+    height: 40px;
+    min-width: 40px;
+    padding: 0;
+    display: grid;
+    place-items: center;
+    font-size: 24px;
+    line-height: 1;
+    border-radius: 8px;
+    flex-shrink: 0;
+    cursor: pointer;
+  }
+  .xod-quick-chips {
+    flex-shrink: 0;
+    display: flex;
+    gap: 6px;
+    padding: 6px 12px;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    box-sizing: border-box;
+    width: 100%;
+  }
+  .xod-quick-chips::-webkit-scrollbar { display: none; }
+  .xod-quick-chips .chip-btn {
+    white-space: nowrap;
+    flex-shrink: 0;
+    font-size: 11.5px;
+    padding: 5px 11px;
+    border-radius: 999px;
+  }
+  .xod-body {
+    flex: 1 1 0;
+    min-height: 0;
+    overflow-y: auto;
+    padding: 12px;
+    overscroll-behavior: contain;
+    box-sizing: border-box;
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+  .xod-msg { max-width: 92%; box-sizing: border-box; }
+  .xod-bubble {
+    overflow-wrap: anywhere;
+    word-break: break-word;
+    white-space: pre-wrap;
+    box-sizing: border-box;
+    font-size: 14.5px;
+    line-height: 1.45;
+  }
+  .xod-msg-assistant:first-child .xod-bubble { white-space: normal; }
+  .xod-input-bar {
+    flex-shrink: 0;
+    box-sizing: border-box;
+    width: 100%;
+    padding: 8px 12px calc(env(safe-area-inset-bottom, 0px) + 8px);
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    background: var(--surface-2);
+    border-top: 1px solid var(--border);
+  }
+  .xod-input-bar input {
+    min-width: 0;
+    width: 0;
+    flex: 1 1 0;
+    font-size: 15px;
+    height: 42px;
+    border-radius: 12px;
+    padding: 0 12px;
+    box-sizing: border-box;
+  }
+  .xod-input-bar .btn {
+    flex: 0 0 auto;
+    height: 42px;
+    padding: 0 16px;
+    border-radius: 12px;
+    font-weight: 600;
+  }
 }
 
 
 
 .xod-dialog:not([open]) { display: none; }
-
-@media (max-width: 768px) {
-  .xod-input-bar .btn { padding-left: 16px; padding-right: 16px; min-width: 0; max-width: 28vw; }
-  .xod-msg-assistant:first-child .xod-bubble { white-space: normal; }
-}
