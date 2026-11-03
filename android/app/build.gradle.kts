@@ -19,8 +19,8 @@ android {
         applicationId = "io.github.cloudcorprecords.rdrive"
         minSdk = 26
         targetSdk = 36
-        versionCode = 6
-        versionName = "0.5.3"
+        versionCode = 7
+        versionName = "0.5.4"
     }
 
     signingConfigs {
