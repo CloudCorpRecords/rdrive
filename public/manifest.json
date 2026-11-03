@@ -1,0 +1,47 @@
+{
+  "name": "rdrive",
+  "short_name": "rdrive",
+  "description": "Private, fast, self-hosted personal cloud storage and productivity suite.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0f1412",
+  "theme_color": "#0f1412",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Photos & Media",
+      "short_name": "Photos",
+      "description": "View all photos and video timeline",
+      "url": "/#photos",
+      "icons": [{ "src": "/icon.svg", "sizes": "any" }]
+    },
+    {
+      "name": "Starred Files",
+      "short_name": "Starred",
+      "description": "Access your bookmarked files",
+      "url": "/#starred",
+      "icons": [{ "src": "/icon.svg", "sizes": "any" }]
+    },
+    {
+      "name": "Scan Document",
+      "short_name": "Scan",
+      "description": "Quick camera document and receipt scanner",
+      "url": "/#scan",
+      "icons": [{ "src": "/icon.svg", "sizes": "any" }]
+    },
+    {
+      "name": "New Document",
+      "short_name": "New Doc",
+      "description": "Create a new RDoc document",
+      "url": "/#new-doc",
+      "icons": [{ "src": "/icon.svg", "sizes": "any" }]
+    }
+  ]
+}

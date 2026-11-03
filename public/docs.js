@@ -15,6 +15,27 @@
     txt: { label: 'plain text', mime: 'text/plain;charset=utf-8' },
   };
 
+  const docRevisions = new Map();
+
+  function escapeHtml(s) {
+    return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+
+  function simpleWordDiff(oldStr, newStr) {
+    const oldWords = (oldStr || '').split(/(\s+)/);
+    const newWords = (newStr || '').split(/(\s+)/);
+    const oldSet = new Set(oldWords);
+    let html = '';
+    for (const w of newWords) {
+      if (!oldSet.has(w) && w.trim()) {
+        html += `<ins class="diff-ins">${escapeHtml(w)}</ins>`;
+      } else {
+        html += escapeHtml(w);
+      }
+    }
+    return html || 'No differences detected.';
+  }
+
   function baseName(name) {
     return String(name || 'Document').replace(/\.[^.]+$/, '') || 'Document';
   }
@@ -120,6 +141,10 @@
         await saveHtml(I().sanitizeHtml(editor.innerHTML));
         dirty = false;
         status.textContent = 'All changes saved';
+        const revs = docRevisions.get(name) || [];
+        revs.unshift({ time: new Date(), html: editor.innerHTML, text: editor.innerText });
+        if (revs.length > 20) revs.pop();
+        docRevisions.set(name, revs);
         if (onSaved) onSaved();
       } catch (err) {
         status.textContent = 'Save failed';
@@ -191,6 +216,85 @@
       const row = (cell) => `<tr>${cell.repeat(3)}</tr>`;
       exec('insertHTML', `<table><thead>${row('<th><br></th>')}</thead><tbody>${row('<td><br></td>')}${row('<td><br></td>')}</tbody></table><p><br></p>`);
     });
+
+    on('doc-slash-btn', async () => {
+      const choice = window.rdriveAsk
+        ? await window.rdriveAsk('Insert block (table, callout, task, code, ai)', 'callout', 'Insert')
+        : prompt('Insert block: table, callout, task, code, ai', 'callout');
+      if (!choice) return;
+      const c = choice.toLowerCase().trim();
+      if (c.includes('table')) {
+        const row = (cell) => `<tr>${cell.repeat(3)}</tr>`;
+        exec('insertHTML', `<table><thead>${row('<th><br></th>')}</thead><tbody>${row('<td><br></td>')}${row('<td><br></td>')}</tbody></table><p><br></p>`);
+      } else if (c.includes('callout') || c.includes('note')) {
+        exec('insertHTML', `<div class="callout callout-note"><strong>Note:</strong> Enter note here...</div><p><br></p>`);
+      } else if (c.includes('warn')) {
+        exec('insertHTML', `<div class="callout callout-warning"><strong>Warning:</strong> Caution note here...</div><p><br></p>`);
+      } else if (c.includes('task') || c.includes('todo')) {
+        exec('insertHTML', `<div class="task-item"><input type="checkbox"> <span>New task</span></div><p><br></p>`);
+      } else if (c.includes('code')) {
+        exec('insertHTML', `<pre class="code-block"><code>// Code here</code></pre><p><br></p>`);
+      } else if (c.includes('ai')) {
+        const p = window.rdriveAsk ? await window.rdriveAsk('What should AI draft or summarize?', '', 'Generate') : prompt('What should AI draft or summarize?');
+        if (p) {
+          try {
+            const r = await fetch('/api/ai/cell', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', 'X-Rdrive': '1' },
+              body: JSON.stringify({ type: 'prompt', prompt: p, text: editor.innerText.slice(0, 500) }),
+            }).then((res) => res.json());
+            if (r.result) exec('insertHTML', `<p>${escapeHtml(r.result)}</p>`);
+          } catch {}
+        }
+      }
+      markDirty();
+    });
+
+    const historyDlg = $('doc-history-dialog');
+    const historySelect = $('doc-history-select');
+    const historyDiff = $('doc-diff-view');
+    const historyRestore = $('doc-history-restore');
+    const historyClose = $('doc-history-close');
+
+    if (historyClose && historyDlg) historyClose.onclick = () => historyDlg.close();
+
+    on('doc-history-btn', () => {
+      if (!historyDlg) return;
+      const revs = docRevisions.get(name) || [];
+      if (!revs.length) {
+        toast('No earlier snapshots saved in this session yet.');
+        return;
+      }
+      historySelect.replaceChildren();
+      revs.forEach((r, idx) => {
+        const opt = document.createElement('option');
+        opt.value = String(idx);
+        opt.textContent = `${new Date(r.time).toLocaleTimeString()} (${r.text.length} chars)`;
+        historySelect.appendChild(opt);
+      });
+      const updateDiff = () => {
+        const sel = revs[parseInt(historySelect.value, 10)];
+        if (sel) {
+          historyDiff.innerHTML = simpleWordDiff(sel.text, editor.innerText);
+        }
+      };
+      historySelect.onchange = updateDiff;
+      updateDiff();
+      historyDlg.showModal();
+    });
+
+    if (historyRestore) {
+      historyRestore.onclick = () => {
+        const revs = docRevisions.get(name) || [];
+        const sel = revs[parseInt(historySelect.value, 10)];
+        if (sel) {
+          editor.innerHTML = I().sanitizeHtml(sel.html);
+          markDirty();
+          historyDlg.close();
+          toast('Restored selected snapshot.');
+        }
+      };
+    }
     const imageInput = $('doc-image-input');
     on('doc-image', () => imageInput.click());
     imageInput.onchange = () => {
@@ -213,6 +317,21 @@
       exportSelect.value = '';
       if (!choice) return;
       if (choice === 'pdf') return printDoc();
+      if (choice === 'clip:md') {
+        const interop = I();
+        const clean = interop.sanitizeHtml(editor.innerHTML);
+        const md = interop.htmlToMarkdown(clean);
+        if (window.rdriveCopy) {
+          await window.rdriveCopy(md, 'Copied Markdown for AI to clipboard!');
+        } else if (navigator.clipboard && navigator.clipboard.writeText) {
+          await navigator.clipboard.writeText(md);
+          toast('Copied Markdown for AI to clipboard!');
+        } else {
+          prompt('Copy Markdown:', md);
+        }
+        status.textContent = 'Copied Markdown for AI';
+        return;
+      }
       const [mode, kind] = choice.split(':');
       const fileName = `${baseName(name)}.${kind}`;
       status.textContent = `Preparing ${EXPORTS[kind].label} file…`;

@@ -22,11 +22,42 @@ let quitting = false;
 let usingLocalFallback = false;
 let updates = null; // desktop/updater.js
 
+function handlePairUri(uri) {
+  try {
+    if (!uri) return false;
+    let url, token;
+    // Only on first setup: an rdrive:// link must never silently move an already set-up app to another drive.
+    if (settings.values.serverUrl || settings.values.mode === 'host') return false;
+    if (uri.startsWith('rdrive://pair')) {
+      const parsed = new URL(uri);
+      url = detect.normalizeAddress(parsed.searchParams.get('url'));
+      token = parsed.searchParams.get('token');
+    }
+    if (url && /^https:/.test(url) && /^[0-9a-f]{64}$/.test(token || '')) {
+      settings.update({ mode: 'connect', serverUrl: url });
+      if (setupWindow) setupWindow.close();
+      showMain();
+      if (mainWindow) mainWindow.loadURL(`${url}/pair#${token}`);
+      return true;
+    }
+  } catch {}
+  return false;
+}
+
 if (!app.requestSingleInstanceLock()) {
   app.quit();
 } else {
-  app.on('second-instance', () => showMain());
+  app.on('second-instance', (e, argv) => {
+    const pairArg = argv && argv.find((a) => typeof a === 'string' && a.startsWith('rdrive://pair'));
+    if (pairArg && handlePairUri(pairArg)) return;
+    showMain();
+  });
 }
+
+app.on('open-url', (e, uri) => {
+  e.preventDefault();
+  handlePairUri(uri);
+});
 
 // ---------- paths ----------
 
@@ -381,9 +412,13 @@ ipcMain.handle('settings:save', async (e, next) => {
   if (settings.values.mode === 'host') startServer();
   applyLoginItem();
   updateTray();
+  // A pasted "Connect a device" link (https://drive/pair#token) also signs this computer in.
+  const pairToken = /\/pair#([0-9a-f]{64})$/.exec(String(next.serverUrl || '').trim());
+  const pairUrl = pairToken && settings.values.mode === 'connect' ? `${settings.values.serverUrl}/pair#${pairToken[1]}` : null;
   setupWindow.close();
-  if (mainWindow) loadDrive();
   showMain();
+  if (pairUrl && mainWindow) mainWindow.loadURL(pairUrl);
+  else if (mainWindow) loadDrive();
   return null;
 });
 

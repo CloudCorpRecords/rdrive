@@ -16,6 +16,7 @@ const BUNDLES = [
   ['jszip.min.js', 'jszip', 'dist/jszip.min.js'],
   ['mammoth.browser.min.js', 'mammoth', 'mammoth.browser.min.js'],
   ['docx.iife.js', 'docx', 'dist/index.iife.js'],
+  ['qrcode.js', 'qrcode-generator', 'dist/qrcode.js'],
 ];
 
 function source(pkg, file) {

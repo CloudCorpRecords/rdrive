@@ -10,6 +10,7 @@
 //   node server.js deluser NAME             remove a user (their files stay on disk)
 //   node server.js users                    list users
 const fs = require('node:fs');
+const fsp = fs.promises;
 const http = require('node:http');
 const https = require('node:https');
 const path = require('node:path');
@@ -22,7 +23,17 @@ const { Sync } = require('./lib/sync');
 const { Shares, isSheetName, isDocName, isEditableName } = require('./lib/shares');
 const { streamFolderAsZip } = require('./lib/zip');
 const { handleWebdav } = require('./lib/webdav');
-const { McpServer } = require('./lib/mcp');
+const { McpServer, generateLlmsTxt } = require('./lib/mcp');
+const { DevicePairing } = require('./lib/pair');
+const { rdocToMarkdown, isRdocName } = require('./lib/rdoc');
+const ai = require('./lib/ai_service');
+const { getPhotosTimeline } = require('./lib/photos');
+const { OCRStore, smartSearch } = require('./lib/smart_search');
+const { WatcherManager } = require('./lib/watchers');
+const { StarredManager } = require('./lib/starred');
+const { VaultManager } = require('./lib/vault');
+const { getStorageAnalytics } = require('./lib/storage_cleanup');
+const { XodBridge } = require('./lib/xod_bridge');
 
 const DATA_DIR = path.resolve(process.env.RDRIVE_DATA || path.join(__dirname, 'data'));
 const PORT = Number(process.env.PORT || 8443);
@@ -47,8 +58,11 @@ const STATIC = {
   '/vendor/jszip.min.js': ['vendor/jszip.min.js', 'text/javascript; charset=utf-8'],
   '/vendor/mammoth.browser.min.js': ['vendor/mammoth.browser.min.js', 'text/javascript; charset=utf-8'],
   '/vendor/docx.iife.js': ['vendor/docx.iife.js', 'text/javascript; charset=utf-8'],
+  '/vendor/qrcode.js': ['vendor/qrcode.js', 'text/javascript; charset=utf-8'],
+  '/vendor/sql_engine.js': ['vendor/sql_engine.js', 'text/javascript; charset=utf-8'],
   '/style.css': ['style.css', 'text/css; charset=utf-8'],
   '/icon.svg': ['icon.svg', 'image/svg+xml'],
+  '/manifest.json': ['manifest.json', 'application/manifest+json; charset=utf-8'],
 };
 
 // Types that are safe to show inline in the browser. Everything else (notably
@@ -72,7 +86,7 @@ function securityHeaders(res) {
   res.setHeader('Cross-Origin-Opener-Policy', 'same-origin');
   res.setHeader(
     'Content-Security-Policy',
-    "default-src 'self'; img-src 'self' blob: data:; media-src 'self' blob:; frame-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'"
+    "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; media-src 'self' blob:; frame-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'"
   );
 }
 
@@ -196,9 +210,15 @@ function defaultSheetPayload(title = 'Sheet 1') {
   );
 }
 
-// options: { auth, files, github?, sync?, shares?, secureCookies?, trustProxy? }
-function createHandler({ auth, files, github = null, sync = null, shares = null, secureCookies = USE_HTTPS, trustProxy = TRUST_PROXY }) {
+// options: { auth, files, github?, sync?, shares?, pairing?, secureCookies?, trustProxy? }
+function createHandler({ auth, files, github = null, sync = null, shares = null, pairing = null, ocrStore = null, watchers = null, starred = null, vault = null, xodBridge = null, secureCookies = USE_HTTPS, trustProxy = TRUST_PROXY }) {
   if (!shares && files && files.filesDir) shares = new Shares(path.dirname(files.filesDir));
+  if (!pairing) pairing = new DevicePairing();
+  if (!ocrStore && files && files.filesDir) ocrStore = new OCRStore(path.dirname(files.filesDir));
+  if (!watchers && files && files.filesDir) watchers = new WatcherManager(path.dirname(files.filesDir), ocrStore);
+  if (!starred && files && files.filesDir) starred = new StarredManager(path.dirname(files.filesDir));
+  if (!vault && files && files.filesDir) vault = new VaultManager(path.dirname(files.filesDir));
+  if (!xodBridge && files) xodBridge = new XodBridge({ files, vault, shares });
   const mcp = new McpServer({ auth, files, shares, onChanged: () => sync && sync.localChanged() });
   const secure = secureCookies ? '; Secure' : '';
   const sessionCookie = (token, maxAgeSec) => `${COOKIE}=${token}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${maxAgeSec}${secure}`;
@@ -215,6 +235,16 @@ function createHandler({ auth, files, github = null, sync = null, shares = null,
     return req.socket.remoteAddress || 'unknown';
   };
 
+  // The address other devices and AI agents should use. Prefer the configured public URL over headers.
+  const publicOrigin = (req) => {
+    const configured = String(process.env.RDRIVE_PUBLIC_URL || '').replace(/\/+$/, '');
+    if (/^https?:\/\/[^/]+$/i.test(configured)) return configured;
+    const fwd = trustProxy && String(req.headers['x-forwarded-proto'] || '').split(',')[0].trim();
+    const proto = fwd === 'https' || fwd === 'http' ? fwd : USE_HTTPS ? 'https' : 'http';
+    const host = /^[A-Za-z0-9.:[\]-]+$/.test(req.headers.host || '') ? req.headers.host : `${HOST}:${PORT}`;
+    return `${proto}://${host}`;
+  };
+
   return async function handle(req, res) {
     securityHeaders(res);
     const url = new URL(req.url, 'http://x');
@@ -222,15 +252,51 @@ function createHandler({ auth, files, github = null, sync = null, shares = null,
     const q = url.searchParams;
     const ip = clientIp(req);
     const cookies = parseCookies(req.headers.cookie);
-    const token = cookies[COOKIE];
+    const authHeader = String(req.headers.authorization || '');
+    const bearerMatch = /^Bearer\s+(\S+)$/i.exec(authHeader);
+    const token = cookies[COOKIE] || (bearerMatch ? bearerMatch[1] : null);
+    const vaultToken = req.headers['x-rdrive-vault'] || cookies['rdrive_vault'];
     const meta = { ip, userAgent: req.headers['user-agent'] };
     const changed = () => sync && sync.localChanged();
 
     try {
-      if ((req.method === 'GET' || req.method === 'HEAD') && (STATIC[route] || /^\/s\/[A-Za-z0-9_-]+$/.test(route))) {
+      if ((req.method === 'GET' || req.method === 'HEAD') && (STATIC[route] || route === '/pair' || /^\/s\/[A-Za-z0-9_-]+$/.test(route))) {
         const [file, type] = STATIC[route] || STATIC['/'];
         res.writeHead(200, { 'Content-Type': type, 'Cache-Control': 'no-cache' });
         return res.end(req.method === 'HEAD' ? undefined : fs.readFileSync(path.join(PUBLIC_DIR, file)));
+      }
+
+      // ---- AI overview guide (/llms.txt) ----
+      if (route === '/llms.txt' && (req.method === 'GET' || req.method === 'HEAD')) {
+        const body = generateLlmsTxt({ origin: publicOrigin(req) });
+        res.writeHead(200, {
+          'Content-Type': 'text/markdown; charset=utf-8',
+          'Cache-Control': 'public, max-age=3600',
+        });
+        return res.end(req.method === 'HEAD' ? undefined : body);
+      }
+
+      // ---- Public share direct markdown (/s/:id.md) ----
+      const mdShareMatch = /^\/s\/([A-Za-z0-9_-]+)\.md$/.exec(route);
+      if (mdShareMatch && (req.method === 'GET' || req.method === 'HEAD')) {
+        if (!shares) throw new HttpError(404, 'Not found.');
+        const shareId = mdShareMatch[1];
+        const s = shares.get(shareId);
+        if (!s || !auth.getUser(s.user)) throw new HttpError(404, 'This share link does not exist or has expired.');
+        const unlocked = shares.isUnlocked(shareId, cookies[shareCookieName(shareId)]);
+        if (!unlocked) throw new HttpError(401, 'Password required.');
+        const file = await files.fileForDownload(s.user, s.path);
+        if (!isRdocName(file.name) && !/\.(md|markdown|txt)$/i.test(file.name)) {
+          throw new HttpError(415, 'Only documents and text files have a Markdown version.');
+        }
+        if (file.size > 2 * 1024 * 1024) throw new HttpError(413, 'This document is too large to show as Markdown.');
+        const raw = await fsp.readFile(file.full, 'utf8');
+        const mdText = isRdocName(file.name) ? rdocToMarkdown(raw) : raw;
+        res.writeHead(200, {
+          'Content-Type': 'text/markdown; charset=utf-8',
+          'Cache-Control': 'private, no-cache',
+        });
+        return res.end(req.method === 'HEAD' ? undefined : mdText);
       }
 
       // ---- WebDAV network drive mount (/dav) ----
@@ -424,6 +490,38 @@ function createHandler({ auth, files, github = null, sync = null, shares = null,
         return sendJson(res, 200, { ok: true });
       }
 
+      // ---- Device pairing (unauthenticated side) ----
+      if (route === '/api/pair/claim' && req.method === 'POST') {
+        const wait = auth.lockedFor(ip);
+        if (wait) throw new HttpError(429, `Too many failed attempts. Try again in ${Math.ceil(wait / 60)} minute(s).`);
+        const { token: linkToken } = await readJsonBody(req);
+        const claimed = pairing.claimLinkToken(linkToken);
+        if (!claimed || !auth.getUser(claimed.user)) {
+          auth.recordFailure(ip);
+          throw new HttpError(400, 'Invalid or expired pairing link.');
+        }
+        const t = auth.createSession(claimed.user, { ...meta, method: 'pair-link' });
+        res.setHeader('Set-Cookie', sessionCookie(t, SESSION_TTL_MS / 1000));
+        return sendJson(res, 200, { ok: true, user: claimed.user });
+      }
+      if (route === '/api/pair/request' && req.method === 'POST') {
+        const wait = auth.lockedFor(ip);
+        if (wait) throw new HttpError(429, `Too many failed attempts. Try again in ${Math.ceil(wait / 60)} minute(s).`);
+        const codeReq = pairing.createCodeRequest(ip);
+        if (!codeReq) throw new HttpError(429, 'Too many sign-in codes waiting. Try again in a few minutes.');
+        return sendJson(res, 200, codeReq);
+      }
+      if (route === '/api/pair/status' && req.method === 'GET') {
+        const status = pairing.checkCodeStatus(q.get('id'));
+        if (status.status === 'approved' && auth.getUser(status.user)) {
+          // The session is made here, for the device that asked, not when the code was approved.
+          const t = auth.createSession(status.user, { ...meta, method: 'pair-code' });
+          res.setHeader('Set-Cookie', sessionCookie(t, SESSION_TTL_MS / 1000));
+          return sendJson(res, 200, { status: 'approved', user: status.user });
+        }
+        return sendJson(res, 200, { status: status.status === 'pending' ? 'pending' : 'expired' });
+      }
+
       // ---- Public share links (/api/public/share*) ----
       if (route.startsWith('/api/public/share')) {
         if (!shares) throw new HttpError(404, 'Not found.');
@@ -447,6 +545,7 @@ function createHandler({ auth, files, github = null, sync = null, shares = null,
         const unlocked = shares.isUnlocked(id, cookies[shareCookieName(id)]);
 
         if (route === '/api/public/share' && req.method === 'GET') {
+          shares.recordView(s.id);
           const baseName = path.posix.basename(s.path);
           if (!unlocked) return sendJson(res, 200, { id: s.id, locked: true, name: baseName });
           const full = files.resolve(s.user, s.path);
@@ -474,6 +573,7 @@ function createHandler({ auth, files, github = null, sync = null, shares = null,
         if (!unlocked) throw new HttpError(401, 'Password required.');
 
         if (route === '/api/public/share/download' && (req.method === 'GET' || req.method === 'HEAD')) {
+          shares.recordDownload(s.id);
           const rootFull = files.resolve(s.user, s.path);
           const rootStat = await files.stat(rootFull);
           const subSegs = rootStat.isDirectory() ? segments(q.get('sub') || '/') : [];
@@ -509,11 +609,218 @@ function createHandler({ auth, files, github = null, sync = null, shares = null,
       // ---- Everything below requires a signed-in user ----
       if (!user) throw new HttpError(401, 'Please sign in.');
 
+      // ---- Device pairing (authenticated side) ----
+      if (route === '/api/pair/link' && req.method === 'POST') {
+        const linkToken = pairing.createLinkToken(user, meta);
+        const origin = publicOrigin(req);
+        const pairUrl = `${origin}/pair#${linkToken}`;
+        const appUri = `rdrive://pair?url=${encodeURIComponent(origin)}&token=${linkToken}`;
+        return sendJson(res, 200, { token: linkToken, url: pairUrl, appUri, expiresIn: 300 });
+      }
+      if (route === '/api/pair/approve' && req.method === 'POST') {
+        const { code } = await readJsonBody(req);
+        if (!pairing.approveCode(code, user)) throw new HttpError(400, 'Invalid, expired, or already used code.');
+        return sendJson(res, 200, { ok: true });
+      }
+
+      // ---- Encrypted Private Vault ("Secure Folder") ----
+      if (route === '/api/vault/status' && req.method === 'GET') {
+        return sendJson(res, 200, {
+          hasPin: vault.hasPin(user),
+          unlocked: vault.isUnlocked(user, vaultToken),
+        });
+      }
+      if (route === '/api/vault/setup' && req.method === 'POST') {
+        const { pin } = await readJsonBody(req);
+        await vault.setPin(user, pin);
+        try { await files.mkdir(user, '/', 'Vault'); } catch {}
+        const session = vault.unlock(user, pin);
+        return sendJson(res, 200, { ok: true, vaultToken: session.token, ...session });
+      }
+      if (route === '/api/vault/unlock' && req.method === 'POST') {
+        const { pin } = await readJsonBody(req);
+        const session = vault.unlock(user, pin);
+        if (!session) throw new HttpError(401, 'Incorrect Vault PIN.');
+        return sendJson(res, 200, { ok: true, vaultToken: session.token, ...session });
+      }
+      if (route === '/api/vault/lock' && req.method === 'POST') {
+        vault.lock(vaultToken);
+        return sendJson(res, 200, { ok: true });
+      }
+
+      // ---- Storage Analytics & Duplicate Cleanup ----
+      if (route === '/api/storage/analytics' && req.method === 'GET') {
+        return sendJson(res, 200, await getStorageAnalytics(files, user));
+      }
+
+      // ---- In-Browser Code & Config Editor ----
+      if (route === '/api/code/read' && req.method === 'GET') {
+        const p = q.get('path');
+        if (!p) throw new HttpError(400, 'Path is required.');
+        if (vault.isVaultPath(p) && !vault.isUnlocked(user, vaultToken)) throw new HttpError(403, 'Vault is locked.');
+        const full = files.resolve(user, p);
+        const st = await files.stat(full);
+        if (st.isDirectory()) throw new HttpError(400, 'Cannot edit a directory as code.');
+        if (st.size > 5 * 1024 * 1024) throw new HttpError(413, 'File is too large to edit in the browser (> 5MB).');
+        const content = await fsp.readFile(full, 'utf8');
+        return sendJson(res, 200, {
+          path: p,
+          name: path.basename(full),
+          size: st.size,
+          modified: st.mtime.toISOString(),
+          content,
+        });
+      }
+      if (route === '/api/code/save' && req.method === 'POST') {
+        const { path: p, content } = await readJsonBody(req);
+        if (!p) throw new HttpError(400, 'Path is required.');
+        if (typeof content !== 'string') throw new HttpError(400, 'Content must be text.');
+        if (vault.isVaultPath(p) && !vault.isUnlocked(user, vaultToken)) throw new HttpError(403, 'Vault is locked.');
+        const norm = '/' + segments(p).join('/');
+        const dir = path.posix.dirname(norm);
+        const name = path.posix.basename(norm);
+        await files.writeBuffer(user, dir, name, Buffer.from(content, 'utf8'), { overwrite: true });
+        changed();
+        return sendJson(res, 200, { ok: true });
+      }
+
+      // ---- XOD Agent & Local Model Inference Bridge ----
+      if (route === '/api/xod/status' && req.method === 'GET') {
+        const status = await xodBridge.getStatus();
+        return sendJson(res, 200, status);
+      }
+      if (route === '/api/xod/action' && req.method === 'POST') {
+        const { tool, args } = await readJsonBody(req);
+        if (!tool) throw new HttpError(400, 'Tool name is required.');
+        const result = await xodBridge.executeTool(user, tool, args || {});
+        changed();
+        return sendJson(res, 200, { ok: true, tool, result });
+      }
+      if (route === '/api/xod/chat' && req.method === 'POST') {
+        const { messages, model, stream = false } = await readJsonBody(req);
+        if (!Array.isArray(messages) || !messages.length) throw new HttpError(400, 'Messages array is required.');
+
+        if (stream) {
+          res.writeHead(200, {
+            'Content-Type': 'text/event-stream',
+            'Cache-Control': 'no-cache',
+            'Connection': 'keep-alive',
+            'X-Accel-Buffering': 'no',
+          });
+          const sendEvt = (obj) => res.write(`data: ${JSON.stringify(obj)}\n\n`);
+
+          try {
+            const out = await xodBridge.runAgentTurn({
+              user,
+              messages,
+              model,
+              onEvent: (evt) => sendEvt(evt),
+            });
+            sendEvt({ type: 'done', response: out });
+            res.end();
+            changed();
+          } catch (err) {
+            sendEvt({ type: 'error', error: err.message });
+            res.end();
+          }
+          return;
+        } else {
+          const events = [];
+          const out = await xodBridge.runAgentTurn({
+            user,
+            messages,
+            model,
+            onEvent: (evt) => events.push(evt),
+          });
+          changed();
+          return sendJson(res, 200, { ok: true, events, response: out });
+        }
+      }
+
       if (route === '/api/list' && req.method === 'GET') {
-        return sendJson(res, 200, { path: q.get('path') || '/', entries: await files.list(user, q.get('path')) });
+        const targetPath = q.get('path') || '/';
+        const isVaultLocked = !vault.isUnlocked(user, vaultToken);
+        if (vault.isVaultPath(targetPath) && isVaultLocked) {
+          throw new HttpError(403, 'Vault is locked.');
+        }
+        let entries = await files.list(user, targetPath);
+        if (targetPath === '/') {
+          if (vault.hasPin(user) && !entries.some((e) => e.name === 'Vault')) {
+            try { await files.mkdir(user, '/', 'Vault'); entries = await files.list(user, '/'); } catch {}
+          }
+          if (isVaultLocked) {
+            entries = entries.map((e) => (e.name === 'Vault' ? { ...e, isVault: true, locked: true } : e));
+          }
+        }
+        return sendJson(res, 200, {
+          path: targetPath,
+          entries,
+          starred: starred.list(user),
+          vault: {
+            hasPin: vault.hasPin(user),
+            unlocked: !isVaultLocked,
+          },
+        });
+      }
+      if (route === '/api/starred' && req.method === 'GET') {
+        const list = starred.list(user);
+        const items = [];
+        for (const p of list) {
+          try {
+            const norm = '/' + segments(p).join('/');
+            const parent = path.posix.dirname(norm);
+            const name = path.posix.basename(norm);
+            const entries = await files.list(user, parent);
+            const found = entries.find((e) => e.name === name);
+            if (found) {
+              items.push({ ...found, path: norm, starred: true });
+            } else {
+              items.push({ name, path: norm, type: 'folder', starred: true });
+            }
+          } catch {}
+        }
+        return sendJson(res, 200, { items, starred: list });
+      }
+      if (route === '/api/starred/toggle' && req.method === 'POST') {
+        const { path: p } = await readJsonBody(req);
+        if (!p) throw new HttpError(400, 'Path is required.');
+        const result = await starred.toggle(user, p);
+        return sendJson(res, 200, result);
       }
       if (route === '/api/search' && req.method === 'GET') {
-        return sendJson(res, 200, { results: await files.search(user, q.get('q')) });
+        let results = await smartSearch(files, ocrStore, user, q.get('q'));
+        if (!vault.isUnlocked(user, vaultToken)) {
+          results = results.filter((r) => !vault.isVaultPath(r.path));
+        }
+        return sendJson(res, 200, { results });
+      }
+      if (route === '/api/photos/timeline' && req.method === 'GET') {
+        const filter = q.get('filter') || 'all';
+        const limit = Number(q.get('limit') || 200);
+        const offset = Number(q.get('offset') || 0);
+        const data = await getPhotosTimeline(files, user, { filter, limit, offset });
+        if (!vault.isUnlocked(user, vaultToken) && data.groups) {
+          data.groups = data.groups.map((g) => ({
+            ...g,
+            items: g.items.filter((item) => !vault.isVaultPath(item.path)),
+          })).filter((g) => g.items.length > 0);
+        }
+        return sendJson(res, 200, data);
+      }
+      if (route === '/api/watchers' && req.method === 'GET') {
+        return sendJson(res, 200, { watchers: watchers.getWatchers(user) });
+      }
+      if (route === '/api/watchers' && req.method === 'POST') {
+        const { watcher, toggleId } = await readJsonBody(req);
+        const list = watchers.getWatchers(user);
+        if (toggleId) {
+          const item = list.find((w) => w.id === toggleId);
+          if (item) item.enabled = !item.enabled;
+        } else if (watcher) {
+          list.push(watcher);
+        }
+        watchers.saveWatchers(user, list);
+        return sendJson(res, 200, { ok: true, watchers: list });
       }
       if (route === '/api/download' && (req.method === 'GET' || req.method === 'HEAD')) {
         const file = await files.fileForDownload(user, q.get('path'));
@@ -536,7 +843,22 @@ function createHandler({ auth, files, github = null, sync = null, shares = null,
       if (route === '/api/upload' && req.method === 'PUT') {
         const name = await files.upload(user, q.get('path'), q.get('name'), req, { overwrite: q.get('overwrite') === '1' });
         changed();
+        const clientPath = (q.get('path') === '/' ? '' : q.get('path')) + '/' + name;
+        watchers.onUpload(files, user, clientPath, name).catch(() => {});
         return sendJson(res, 200, { name });
+      }
+      if (route === '/api/ai/cell' && req.method === 'POST') {
+        const body = await readJsonBody(req);
+        const result = await ai.evalAICell(body);
+        return sendJson(res, 200, { result });
+      }
+      if (route === '/api/ai/formula-copilot' && req.method === 'POST') {
+        const { prompt, formula, action = 'generate', cols } = await readJsonBody(req);
+        if (action === 'explain') {
+          return sendJson(res, 200, { explanation: ai.explainFormula(formula) });
+        }
+        const generated = ai.generateFormula(prompt, cols);
+        return sendJson(res, 200, generated);
       }
       if (route === '/api/sheet/create' && req.method === 'POST') {
         const { path: dirPath = '/', name = 'Untitled spreadsheet.rsheet', format = 'rsheet' } = await readJsonBody(req);
@@ -574,6 +896,7 @@ function createHandler({ auth, files, github = null, sync = null, shares = null,
       if (route === '/api/move' && req.method === 'POST') {
         const { from, to } = await readJsonBody(req);
         await files.move(user, from, to);
+        await starred.rename(user, from, to);
         changed();
         return sendJson(res, 200, { ok: true });
       }
@@ -586,7 +909,10 @@ function createHandler({ auth, files, github = null, sync = null, shares = null,
       if (route === '/api/delete' && req.method === 'POST') {
         const { paths } = await readJsonBody(req);
         if (!Array.isArray(paths) || !paths.length) throw new HttpError(400, 'Nothing to delete.');
-        for (const p of paths) await files.trash(user, p);
+        for (const p of paths) {
+          await files.trash(user, p);
+          await starred.remove(user, p);
+        }
         changed();
         return sendJson(res, 200, { ok: true });
       }
@@ -612,9 +938,9 @@ function createHandler({ auth, files, github = null, sync = null, shares = null,
         return sendJson(res, 200, { shares: shares.list(user, q.get('path') || null) });
       }
       if (route === '/api/shares' && req.method === 'POST') {
-        const { path: targetPath, expiresInHours, password, allowEdit } = await readJsonBody(req);
+        const { path: targetPath, expiresInHours, password, allowEdit, maxDownloads } = await readJsonBody(req);
         await files.stat(files.resolve(user, targetPath));
-        const share = shares.create(user, { path: targetPath, expiresInHours, password, allowEdit });
+        const share = shares.create(user, { path: targetPath, expiresInHours, password, allowEdit, maxDownloads });
         return sendJson(res, 200, { share });
       }
       if (route === '/api/shares/revoke' && req.method === 'POST') {

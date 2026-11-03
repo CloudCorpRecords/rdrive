@@ -2,6 +2,7 @@ package io.github.cloudcorprecords.rdrive
 
 import android.content.Context
 import android.net.Uri
+import android.os.Build
 import android.provider.DocumentsContract
 import android.provider.DocumentsContract.Document
 import androidx.work.Constraints
@@ -14,14 +15,20 @@ import androidx.work.WorkManager
 import androidx.work.Worker
 import androidx.work.WorkerParameters
 import androidx.work.workDataOf
+import org.json.JSONObject
 import java.io.File
 import java.io.IOException
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+import java.util.TimeZone
 import java.util.concurrent.TimeUnit
 
 /**
- * Auto-upload: every ~15 minutes, uploads files in the chosen phone folder that haven't been
- * uploaded yet, into "/Phone/<folder name>/..." on the drive. It only adds files; it never
- * deletes anything on the phone or the drive.
+ * Cloud Backup: every ~15 minutes, thoughtfully backs up files from the chosen phone folder
+ * into "/Backups/<Device Name>/<Category>/..." on the drive. Media (Camera/Photos) is
+ * organized into clean monthly folders (YYYY-MM), and a programmatic backup-info.json
+ * manifest is maintained at the root of the device's backup folder.
  */
 class FolderSyncWorker(ctx: Context, params: WorkerParameters) : Worker(ctx, params) {
 
@@ -39,23 +46,71 @@ class FolderSyncWorker(ctx: Context, params: WorkerParameters) : Worker(ctx, par
         val rootId = DocumentsContract.getTreeDocumentId(tree)
         val rootName = queryName(tree, rootId) ?: "Phone folder"
         val client = DriveClient(server)
+        val device = getDeviceName()
+        val backupRoot = "/Backups/$device"
+        val category = DriveClient.safeName(rootName)
+        val baseTarget = "$backupRoot/$category"
+        val isMedia = isMediaFolder(rootName)
+
         val madeDirs = HashSet<String>()
+        fun writeManifest(status: String) {
+            try {
+                val nowIso = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).apply {
+                    timeZone = TimeZone.getTimeZone("UTC")
+                }.format(Date())
+                val manifest = JSONObject()
+                    .put("device", device)
+                    .put("model", Build.MODEL)
+                    .put("manufacturer", Build.MANUFACTURER)
+                    .put("android", "${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})")
+                    .put("appVersion", Updater.currentVersion(applicationContext))
+                    .put("lastBackup", nowIso)
+                    .put("status", status)
+                    .put("folder", rootName)
+                    .put("filesTracked", seen.size)
+                client.uploadText(backupRoot, "backup-info.json", manifest.toString(2), overwrite = true)
+
+                val readme = """
+                    # Backup: $device
+
+                    Automated cloud backup from **$device** (${Build.MODEL}) running Android ${Build.VERSION.RELEASE}.
+
+                    - **Source folder**: `$rootName`
+                    - **Organization**: Media organized by month (`YYYY-MM`), documents preserved in structure
+                    - **Status**: $status
+                    - **Last sync**: $nowIso
+                    - **Total tracked files**: ${seen.size}
+                """.trimIndent()
+                client.uploadText(backupRoot, "README.md", readme, overwrite = true)
+            } catch (_: Exception) {}
+        }
+
         return try {
-            walk(tree, rootId, "/Phone/${DriveClient.safeName(rootName)}", 0) { docId, name, size, modified, remoteDir ->
+            client.ensureDir(backupRoot)
+            writeManifest("syncing")
+            walk(tree, rootId, baseTarget, 0) { docId, name, size, modified, remoteDir ->
                 val key = "$docId|$size|$modified"
                 if (key in seen) return@walk
                 if (!baselineOnly) {
-                    if (madeDirs.add(remoteDir)) client.ensureDir(remoteDir)
+                    val targetDir = if (isMedia || isMediaFile(name)) {
+                        val dateDir = SimpleDateFormat("yyyy-MM", Locale.US).format(Date(if (modified > 0) modified else System.currentTimeMillis()))
+                        "$baseTarget/$dateDir"
+                    } else {
+                        remoteDir
+                    }
+                    if (madeDirs.add(targetDir)) client.ensureDir(targetDir)
                     val uri = DocumentsContract.buildDocumentUriUsingTree(tree, docId)
-                    applicationContext.contentResolver.openInputStream(uri)?.use { client.upload(remoteDir, name, size, it) }
+                    applicationContext.contentResolver.openInputStream(uri)?.use { client.upload(targetDir, name, size, it) }
                     uploaded++
                 }
                 seen.add(key)
                 if (seen.size % 20 == 0) save()
             }
             save()
+            writeManifest("idle")
+
             if (uploaded > 0) {
-                Notify.post(applicationContext, Notify.ID_FOLDER, "rdrive", "Uploaded $uploaded new file${if (uploaded == 1) "" else "s"} from $rootName")
+                Notify.post(applicationContext, Notify.ID_FOLDER, "rdrive backup", "Backed up $uploaded new file${if (uploaded == 1) "" else "s"} to /Backups/$device")
             }
             Result.success()
         } catch (e: DriveClient.NotSignedIn) {
@@ -143,6 +198,23 @@ class FolderSyncWorker(ctx: Context, params: WorkerParameters) : Worker(ctx, par
         fun cancel(ctx: Context) {
             WorkManager.getInstance(ctx).cancelUniqueWork(PERIODIC)
             WorkManager.getInstance(ctx).cancelUniqueWork(NOW)
+        }
+
+        fun getDeviceName(): String {
+            val manufacturer = Build.MANUFACTURER.orEmpty().trim().replaceFirstChar { it.titlecase() }
+            val model = Build.MODEL.orEmpty().trim()
+            val raw = if (model.startsWith(manufacturer, ignoreCase = true)) model else "$manufacturer $model"
+            return DriveClient.safeName(raw.ifBlank { "Phone" })
+        }
+
+        fun isMediaFolder(name: String): Boolean {
+            val n = name.lowercase().trim()
+            return n == "camera" || n == "dcim" || n == "pictures" || n == "photos" || n == "images" || n == "gallery"
+        }
+
+        fun isMediaFile(name: String): Boolean {
+            val ext = name.substringAfterLast('.', "").lowercase()
+            return ext in setOf("jpg", "jpeg", "png", "heic", "heif", "webp", "gif", "mp4", "mov", "mkv", "3gp", "dng", "raw")
         }
     }
 }
