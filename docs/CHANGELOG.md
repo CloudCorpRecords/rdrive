@@ -3,6 +3,15 @@
 Write what changed under a new `## x.y.z` heading at the top, then run `npm run release -- x.y.z`.
 The section becomes the release notes.
 
+## 0.5.4
+
+- **Sign in new devices from a signed-in one.** On a device that's already signed in, *You → Connect a
+  device* shows a QR code and a one-time link that signs the new device in — no typing addresses or
+  passwords on it. Links work once and expire after 5 minutes. Or pick *Sign in with another device* on
+  the new device's sign-in screen and approve its short code from the signed-in one.
+- **One-click AI connect, and documents for AI.** Hand your drive to an AI in one click, and it can now
+  read and write documents directly (`doc_read`, `doc_write` and `doc_append` as Markdown).
+
 ## 0.5.2
 
 - **New look: Night garden.** Deep green-black with soft mint at night, calm sage in light mode, rounded
