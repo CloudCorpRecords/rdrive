@@ -47,7 +47,7 @@ jobs:
           TAG="${GITHUB_REF_NAME}"; V="${TAG#v}"
           gh release view "$TAG" >/dev/null 2>&1 || gh release create "$TAG" --draft --title "rdrive $V" --notes "Building…"
           gh release upload "$TAG" "desktop/dist/rdrive-$V-arm64.dmg" "desktop/dist/rdrive-$V-x64.dmg" desktop/dist/rdrive-Mac-AppleSilicon.dmg desktop/dist/rdrive-Mac-Intel.dmg --clobber
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: sums-mac
           path: desktop/dist/sums-mac.txt
@@ -83,7 +83,7 @@ jobs:
           for i in 1 2 3 4 5 6 7 8 9; do gh release view "$TAG" >/dev/null 2>&1 && break; sleep 20; done
           gh release view "$TAG" >/dev/null 2>&1 || gh release create "$TAG" --draft --title "rdrive $V" --notes "Building…"
           gh release upload "$TAG" "desktop/dist/rdrive-$V-x64-setup.exe" desktop/dist/rdrive-Windows-Setup.exe --clobber
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: sums-win
           path: desktop/dist/sums-win.txt
