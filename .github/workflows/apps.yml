@@ -36,7 +36,7 @@ jobs:
         working-directory: desktop
       - run: npm run ${{ matrix.script }}
         working-directory: desktop
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: rdrive-desktop-${{ runner.os }}
           path: ${{ matrix.files }}
@@ -55,7 +55,7 @@ jobs:
       - name: Build and unit-test
         working-directory: android
         run: ./gradlew --no-daemon testDebugUnitTest assembleRelease
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: rdrive-android
           path: android/app/build/outputs/apk/release/*.apk
